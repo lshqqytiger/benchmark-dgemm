@@ -1,0 +1,10 @@
+[package]
+name = "benchmark"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+armpl-sys = { path = "./armpl-sys" }
+argh = "0.1.13"
+libloading = "0.8.6"
+rayon = "1.10.0"

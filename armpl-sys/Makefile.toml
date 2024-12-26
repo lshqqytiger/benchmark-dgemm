@@ -1,0 +1,23 @@
+[tasks.bindgen]
+command = "bindgen"
+args = [
+    "/opt/arm/armpl-24.10.0_Ubuntu-22.04_arm-linux-compiler/include/armpl.h",
+    "-o",
+    "src/armpl.rs",
+    "--rust-target",
+    "1.82",
+    "--no-layout-tests",
+    "--no-derive-debug",
+    "--default-enum-style=newtype",
+    "--allowlist-function",
+    "cblas.*",
+    "--allowlist-type",
+    "cblas.*",
+    "--allowlist-var",
+    "^CBLAS.*$",
+    "--",
+    "-I",
+    "/opt/arm/armpl-24.10.0_Ubuntu-22.04_arm-linux-compiler/include",
+    "-x",
+    "c++",
+]
