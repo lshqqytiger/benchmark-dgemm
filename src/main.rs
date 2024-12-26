@@ -155,6 +155,7 @@ fn build(kernel: &String, out: &String) -> process::ExitStatus {
         .expect("Error: failed to wait compiler exit")
 }
 
+/// Originally written by Enoch Jung in C.
 fn prepare(size: usize, seed: u64, min: f64, max: f64) -> Box<[f64]> {
     let mul = 192499u64;
     let add = 6837199u64;
