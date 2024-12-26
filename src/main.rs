@@ -95,23 +95,14 @@ impl<'a> Kernel<'a> {
         alpha: f64,
         beta: f64,
     ) -> time::Duration {
+        let a = a.as_ptr();
+        let b = b.as_ptr();
+        let c = c.as_mut_ptr();
+
         let start_time = time::Instant::now();
         unsafe {
             self.0(
-                layout,
-                trans_a,
-                trans_b,
-                m,
-                n,
-                k,
-                alpha,
-                a.as_ptr(),
-                lda,
-                b.as_ptr(),
-                ldb,
-                beta,
-                c.as_mut_ptr(),
-                ldc,
+                layout, trans_a, trans_b, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc,
             );
         }
         time::Instant::now() - start_time
