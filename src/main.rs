@@ -147,14 +147,14 @@ fn build(kernel: &String, out: &String) -> process::ExitStatus {
 }
 
 /// Originally written by Enoch Jung in C.
-fn prepare(size: usize, seed: u64, min: f64, max: f64) -> Box<[f64]> {
+fn prepare(chunk_size: usize, size: usize, seed: u64, min: f64, max: f64) -> Box<[f64]> {
     let mul = 192499u64;
     let add = 6837199u64;
 
     let scaling_factor = (max - min) / (u64::MAX as f64);
     let mut matrix = unsafe { malloc::<f64>(size) };
     matrix
-        .par_chunks_mut(64 * 4 * 2) // 64-core * 4-thread * 2-node
+        .par_chunks_mut(chunk_size)
         .enumerate()
         .for_each(|(tid, chunk)| {
             let mut value = (tid as u64 * 1034871 + 10581) * seed;
@@ -170,6 +170,9 @@ fn prepare(size: usize, seed: u64, min: f64, max: f64) -> Box<[f64]> {
         });
     matrix
 }
+
+/// ???
+static CHUNK_SIZE: usize = 2048;
 
 fn main() {
     let args: Arguments = argh::from_env();
@@ -190,8 +193,8 @@ fn main() {
 
     let dimensions = (args.m, args.n, args.k);
     let (m, n, k) = dimensions;
-    let a = prepare(m * k, 100, 0.0, 2.0);
-    let b = prepare(k * n, 200, 0.0, 2.0);
+    let a = prepare(CHUNK_SIZE, m * k, 100, 0.0, 2.0);
+    let b = prepare(CHUNK_SIZE, k * n, 200, 0.0, 2.0);
     let mut c = unsafe { malloc::<f64>(m * n) };
 
     println!("M: {}, N: {}, K: {}", m, n, k);
