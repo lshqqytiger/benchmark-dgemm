@@ -1,3 +1,4 @@
+#![allow(warnings)]
 pub mod armpl;
 use std::fmt;
 

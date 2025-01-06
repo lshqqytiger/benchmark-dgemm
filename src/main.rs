@@ -1,10 +1,12 @@
 use argh::FromArgs;
-use armpl_sys::{CBLAS_LAYOUT, CBLAS_TRANSPOSE};
+use armpl_sys::{
+    armpl_int_t, cblas_daxpy, cblas_dgemm, cblas_dnrm2, CBLAS_LAYOUT, CBLAS_TRANSPOSE,
+};
 use rayon::{
-    iter::{IndexedParallelIterator, ParallelIterator},
+    iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator},
     slice::ParallelSliceMut,
 };
-use std::{ffi::c_double, fs, process, time};
+use std::{ffi::c_double, fmt, fs, process, time};
 
 #[derive(FromArgs)]
 /// arguments
@@ -109,6 +111,7 @@ impl<'a> Kernel<'a> {
     }
 }
 
+#[inline(always)]
 unsafe fn malloc<T>(size: usize) -> Box<[T]> {
     Box::<[T]>::new_uninit_slice(size).assume_init()
 }
@@ -171,6 +174,43 @@ fn prepare(chunk_size: usize, size: usize, seed: u64, min: f64, max: f64) -> Box
     matrix
 }
 
+#[inline(always)]
+fn ns_to_ms(ns: u128) -> f64 {
+    ns as f64 / 1000.0 / 1000.0
+}
+
+struct Statistics {
+    pub medium: u128,
+    pub average: u128,
+    pub maximum: u128,
+    pub minimum: u128,
+}
+
+impl Statistics {
+    fn from(mut records: Vec<u128>) -> Statistics {
+        records.par_sort();
+        let medium = records[records.len() / 2];
+        let average = records.par_iter().sum::<u128>() / records.len() as u128;
+        let maximum = *records.last().unwrap();
+        let minimum = *records.first().unwrap();
+        Statistics {
+            medium,
+            average,
+            maximum,
+            minimum,
+        }
+    }
+}
+
+impl fmt::Display for Statistics {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_fmt(format_args!("Medium: {}ms\n", ns_to_ms(self.medium)))?;
+        f.write_fmt(format_args!("Average: {}ms\n", ns_to_ms(self.average)))?;
+        f.write_fmt(format_args!("Maximum: {}ms\n", ns_to_ms(self.maximum)))?;
+        f.write_fmt(format_args!("Minimum: {}ms\n", ns_to_ms(self.minimum)))
+    }
+}
+
 /// ???
 static CHUNK_SIZE: usize = 2048;
 
@@ -207,33 +247,66 @@ fn main() {
     println!("TransA: {}", trans_a == CBLAS_TRANSPOSE::CblasTrans);
     println!("TransB: {}", trans_b == CBLAS_TRANSPOSE::CblasTrans);
 
-    for _ in 0..args.repeats {
-        let duration = kernel.run(
-            layout,
-            trans_a,
-            trans_b,
-            dimensions,
-            &a,
-            if (trans_a == CBLAS_TRANSPOSE::CblasTrans) != (layout == CBLAS_LAYOUT::CblasRowMajor) {
-                k
-            } else {
-                m
-            },
-            &b,
-            if (trans_b == CBLAS_TRANSPOSE::CblasTrans) != (layout == CBLAS_LAYOUT::CblasRowMajor) {
-                n
-            } else {
-                k
-            },
-            &mut c,
-            if layout == CBLAS_LAYOUT::CblasRowMajor {
-                n
-            } else {
-                m
-            },
-            args.alpha,
-            args.beta,
-        );
-        println!("Duration: {}", duration.as_secs_f64());
+    let lda = if (trans_a == CBLAS_TRANSPOSE::CblasTrans) != (layout == CBLAS_LAYOUT::CblasRowMajor)
+    {
+        k
+    } else {
+        m
+    };
+    let ldb = if (trans_b == CBLAS_TRANSPOSE::CblasTrans) != (layout == CBLAS_LAYOUT::CblasRowMajor)
+    {
+        n
+    } else {
+        k
+    };
+    let ldc = if layout == CBLAS_LAYOUT::CblasRowMajor {
+        n
+    } else {
+        m
+    };
+
+    let mut records = Vec::with_capacity(args.repeats);
+    for i in 0..args.repeats {
+        let duration = kernel
+            .run(
+                layout, trans_a, trans_b, dimensions, &a, lda, &b, ldb, &mut c, ldc, args.alpha,
+                args.beta,
+            )
+            .as_nanos();
+        println!("Duration: {}ms", ns_to_ms(duration));
+        records.push(duration);
+
+        if i == 0 && !args.skip_verification {
+            let difference = unsafe {
+                let mut d = malloc::<f64>(m * n);
+                cblas_dgemm(
+                    layout,
+                    trans_a,
+                    trans_b,
+                    m as _,
+                    n as _,
+                    k as _,
+                    args.alpha,
+                    a.as_ptr(),
+                    lda as _,
+                    b.as_ptr(),
+                    ldb as _,
+                    args.beta,
+                    d.as_mut_ptr(),
+                    ldc as _,
+                );
+
+                let n = (m * n) as armpl_int_t;
+                cblas_daxpy(n, -1.0, c.as_ptr(), 1, d.as_mut_ptr(), 1);
+                cblas_dnrm2(n, d.as_ptr(), 1)
+            };
+            if difference > 0.0001 {
+                println!("WRONG RESULT!");
+                process::exit(1)
+            }
+        }
     }
+
+    let statistics = Statistics::from(records);
+    println!("{}", statistics);
 }
