@@ -26,6 +26,10 @@ struct Arguments {
     #[argh(option)]
     compile: Option<bool>,
 
+    /// compiler
+    #[argh(option, default = "String::from(\"armclang\")")]
+    compiler: String,
+
     /// repeats
     #[argh(option, default = "10")]
     repeats: usize,
@@ -124,8 +128,8 @@ unsafe fn malloc<T>(size: usize) -> Box<[T]> {
     Box::<[T]>::new_uninit_slice(size).assume_init()
 }
 
-fn build(kernel: &String, out: &String) -> process::ExitStatus {
-    let mut compiler = process::Command::new("armclang")
+fn build(compiler: String, kernel: &String, out: &String) -> process::ExitStatus {
+    let mut compiler = process::Command::new(compiler)
         .args(["-O3", "-mcpu=native"])
         .arg("-fopenmp")
         .args(["-armpl", "-lm", "-lnuma"])
@@ -250,7 +254,7 @@ fn main() {
             true
         })
     {
-        if !build(&args.kernel, &args.out).success() {
+        if !build(args.compiler, &args.kernel, &args.out).success() {
             eprintln!("Error: compilation failed!");
             process::exit(1)
         }
