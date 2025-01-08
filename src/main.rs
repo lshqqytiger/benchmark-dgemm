@@ -49,8 +49,8 @@ struct Arguments {
     skip_verification: bool,
 
     /// layout
-    #[argh(option, default = "CBLAS_LAYOUT::CblasRowMajor.0")]
-    layout: u32,
+    #[argh(option, default = "String::from(\"ROW\")")]
+    layout: String,
 
     /// transpose a
     #[argh(option, default = "CBLAS_TRANSPOSE::CblasNoTrans.0")]
@@ -61,15 +61,15 @@ struct Arguments {
     trans_b: u32,
 
     /// m
-    #[argh(option, default = "10000")]
+    #[argh(option, default = "10000", short = 'm')]
     m: usize,
 
     /// n
-    #[argh(option, default = "10000")]
+    #[argh(option, default = "10000", short = 'n')]
     n: usize,
 
     /// k
-    #[argh(option, default = "10000")]
+    #[argh(option, default = "10000", short = 'k')]
     k: usize,
 
     /// alpha
@@ -279,8 +279,12 @@ fn main() {
     println!("M: {}, N: {}, K: {}", m, n, k);
     println!("alpha: {}, beta: {}", args.alpha, args.beta);
 
-    let layout = CBLAS_LAYOUT(args.layout);
-    let (trans_a, trans_b) = (CBLAS_TRANSPOSE(args.trans_a), CBLAS_TRANSPOSE(args.trans_b));
+    let layout = CBLAS_LAYOUT::try_from(args.layout.to_uppercase().as_str())
+        .expect("Error: unexpected value for layout");
+    let (trans_a, trans_b) = (
+        CBLAS_TRANSPOSE::try_from(args.trans_a).expect("Error: unexpected value for transpose"),
+        CBLAS_TRANSPOSE::try_from(args.trans_b).expect("Error: unexpected value for transpose"),
+    );
 
     println!("Layout: {}", layout);
     println!("TransA: {}", trans_a == CBLAS_TRANSPOSE::CblasTrans);
