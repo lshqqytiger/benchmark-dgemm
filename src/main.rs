@@ -8,20 +8,6 @@ use rayon::{
 };
 use std::{ffi::c_double, fs, process, time};
 
-trait IsErrOr<T> {
-    fn is_err_or(self, f: impl FnOnce(T) -> bool) -> bool;
-}
-
-impl<T, E> IsErrOr<T> for Result<T, E> {
-    #[inline]
-    fn is_err_or(self, f: impl FnOnce(T) -> bool) -> bool {
-        match self {
-            Ok(v) => f(v),
-            Err(_) => true,
-        }
-    }
-}
-
 #[derive(FromArgs)]
 /// arguments
 struct Arguments {
@@ -36,9 +22,9 @@ struct Arguments {
     #[argh(option)]
     save_as: Option<String>,
 
-    /// recompile anyway
-    #[argh(switch)]
-    recompile: bool,
+    /// not present: auto, true: recompile anyway, false: don't recompile
+    #[argh(option)]
+    compile: Option<bool>,
 
     /// repeats
     #[argh(option, default = "10")]
@@ -136,21 +122,6 @@ impl<'a> Kernel<'a> {
 #[inline(always)]
 unsafe fn malloc<T>(size: usize) -> Box<[T]> {
     Box::<[T]>::new_uninit_slice(size).assume_init()
-}
-
-fn is_modified(kernel: &String, out: &String) -> bool {
-    let source = fs::File::open(kernel)
-        .expect("Error: kernel not found!")
-        .metadata()
-        .expect("Error: failed to query metadata");
-    fs::File::open(out).is_err_or(|out| {
-        source.accessed().expect("Error: unsupported platform")
-            > out
-                .metadata()
-                .expect("Error: failed to query metadata")
-                .created()
-                .expect("Error: unsupported platform")
-    })
 }
 
 fn build(kernel: &String, out: &String) -> process::ExitStatus {
@@ -256,10 +227,32 @@ static CHUNK_SIZE: usize = 2048;
 fn main() {
     let args: Arguments = argh::from_env();
 
-    if args.recompile || is_modified(&args.kernel, &args.out) {
+    if fs::File::open(&args.out)
+        .and_then(|out| {
+            let source = fs::File::open(&args.kernel)
+                .expect("Error: kernel not found!")
+                .metadata()
+                .expect("Error: failed to query metadata");
+            Ok(args.compile.unwrap_or(
+                source.accessed().expect("Error: unsupported platform")
+                    > out
+                        .metadata()
+                        .expect("Error: failed to query metadata")
+                        .created()
+                        .expect("Error: unsupported platform"),
+            ))
+        })
+        .unwrap_or_else(|_| {
+            if args.compile.is_some_and(|x| !x) {
+                eprintln!("Error: could not find compiled object");
+                process::exit(1)
+            }
+            true
+        })
+    {
         if !build(&args.kernel, &args.out).success() {
             eprintln!("Error: compilation failed!");
-            return;
+            process::exit(1)
         }
     }
 
