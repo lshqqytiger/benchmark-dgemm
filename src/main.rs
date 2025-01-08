@@ -6,23 +6,45 @@ use rayon::{
     iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator},
     slice::ParallelSliceMut,
 };
-use std::{ffi::c_double, fmt, fs, process, time};
+use std::{ffi::c_double, fs, process, time};
+
+trait IsErrOr<T> {
+    fn is_err_or(self, f: impl FnOnce(T) -> bool) -> bool;
+}
+
+impl<T, E> IsErrOr<T> for Result<T, E> {
+    #[inline]
+    fn is_err_or(self, f: impl FnOnce(T) -> bool) -> bool {
+        match self {
+            Ok(v) => f(v),
+            Err(_) => true,
+        }
+    }
+}
 
 #[derive(FromArgs)]
 /// arguments
 struct Arguments {
-    /// the path to kernel source file.
+    /// path to kernel source file
     #[argh(positional)]
     kernel: String,
 
     #[argh(positional)]
     out: String,
 
+    /// save benchmark result as
+    #[argh(option)]
+    save_as: Option<String>,
+
+    /// recompile anyway
+    #[argh(switch)]
+    recompile: bool,
+
     /// repeats
     #[argh(option, default = "10")]
     repeats: usize,
 
-    /// skip verification
+    /// skip dgemm result verification
     #[argh(switch)]
     skip_verification: bool,
 
@@ -30,11 +52,11 @@ struct Arguments {
     #[argh(option, default = "CBLAS_LAYOUT::CblasRowMajor.0")]
     layout: u32,
 
-    /// trans a
+    /// transpose a
     #[argh(option, default = "CBLAS_TRANSPOSE::CblasNoTrans.0")]
     trans_a: u32,
 
-    /// trans b
+    /// transpose b
     #[argh(option, default = "CBLAS_TRANSPOSE::CblasNoTrans.0")]
     trans_b: u32,
 
@@ -121,16 +143,14 @@ fn is_modified(kernel: &String, out: &String) -> bool {
         .expect("Error: kernel not found!")
         .metadata()
         .expect("Error: failed to query metadata");
-    let out = fs::File::open(out);
-
-    if out.is_err() {
-        true
-    } else if let Ok(out) = out.unwrap().metadata() {
+    fs::File::open(out).is_err_or(|out| {
         source.accessed().expect("Error: unsupported platform")
-            > out.created().expect("Error: unsupported platform")
-    } else {
-        false
-    }
+            > out
+                .metadata()
+                .expect("Error: failed to query metadata")
+                .created()
+                .expect("Error: unsupported platform")
+    })
 }
 
 fn build(kernel: &String, out: &String) -> process::ExitStatus {
@@ -180,10 +200,11 @@ fn ns_to_ms(ns: u128) -> f64 {
 }
 
 struct Statistics {
-    pub medium: u128,
-    pub average: u128,
-    pub maximum: u128,
-    pub minimum: u128,
+    medium: u128,
+    average: u128,
+    maximum: u128,
+    minimum: u128,
+    deviation: f64,
 }
 
 impl Statistics {
@@ -193,21 +214,39 @@ impl Statistics {
         let average = records.par_iter().sum::<u128>() / records.len() as u128;
         let maximum = *records.last().unwrap();
         let minimum = *records.first().unwrap();
+        let deviation = (records
+            .iter()
+            .map(|&x| ns_to_ms(x.abs_diff(average)).powi(2))
+            .fold(0.0, |acc, x| acc + x)
+            / records.len() as f64)
+            .sqrt();
         Statistics {
             medium,
             average,
             maximum,
             minimum,
+            deviation,
         }
     }
-}
 
-impl fmt::Display for Statistics {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_fmt(format_args!("Medium: {}ms\n", ns_to_ms(self.medium)))?;
-        f.write_fmt(format_args!("Average: {}ms\n", ns_to_ms(self.average)))?;
-        f.write_fmt(format_args!("Maximum: {}ms\n", ns_to_ms(self.maximum)))?;
-        f.write_fmt(format_args!("Minimum: {}ms\n", ns_to_ms(self.minimum)))
+    #[inline]
+    fn medium_as_ms(&self) -> f64 {
+        ns_to_ms(self.medium)
+    }
+
+    #[inline]
+    fn average_as_ms(&self) -> f64 {
+        ns_to_ms(self.average)
+    }
+
+    #[inline]
+    fn maximum_as_ms(&self) -> f64 {
+        ns_to_ms(self.maximum)
+    }
+
+    #[inline]
+    fn minimum_as_ms(&self) -> f64 {
+        ns_to_ms(self.minimum)
     }
 }
 
@@ -217,7 +256,7 @@ static CHUNK_SIZE: usize = 2048;
 fn main() {
     let args: Arguments = argh::from_env();
 
-    if is_modified(&args.kernel, &args.out) {
+    if args.recompile || is_modified(&args.kernel, &args.out) {
         if !build(&args.kernel, &args.out).success() {
             eprintln!("Error: compilation failed!");
             return;
@@ -273,7 +312,7 @@ fn main() {
                 args.beta,
             )
             .as_nanos();
-        println!("Duration: {}ms", ns_to_ms(duration));
+        println!("Duration: {:.6}ms", ns_to_ms(duration));
         records.push(duration);
 
         if i == 0 && !args.skip_verification {
@@ -308,5 +347,25 @@ fn main() {
     }
 
     let statistics = Statistics::from(records);
-    println!("{}", statistics);
+    println!(
+        "Medium\t {:.6}ms \t {}",
+        statistics.medium_as_ms(),
+        2.0 * (m * n * k) as f64 / statistics.medium as f64
+    );
+    println!("Average\t {:.6}ms", statistics.average_as_ms());
+    println!(
+        "Worst\t {:.6}ms \t {}",
+        statistics.maximum_as_ms(),
+        2.0 * (m * n * k) as f64 / statistics.maximum as f64
+    );
+    println!(
+        "Best\t {:.6}ms \t {}",
+        statistics.minimum_as_ms(),
+        2.0 * (m * n * k) as f64 / statistics.minimum as f64
+    );
+    println!("Deviation\t {}", statistics.deviation);
+
+    if let Some(_) = args.save_as.and_then(|x| fs::File::create(x).ok()) {
+        // TODO
+    }
 }
