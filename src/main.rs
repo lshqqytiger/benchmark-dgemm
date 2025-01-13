@@ -6,7 +6,7 @@ use rayon::{
     iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator},
     slice::ParallelSliceMut,
 };
-use std::{ffi::c_double, fs, process, time};
+use std::{ffi::c_double, fs, io::Write, process, time};
 
 #[derive(FromArgs)]
 /// arguments
@@ -31,7 +31,7 @@ struct Arguments {
     compiler: String,
 
     /// repeats
-    #[argh(option, default = "10")]
+    #[argh(option, short = 'r', default = "10")]
     repeats: usize,
 
     /// skip dgemm result verification
@@ -51,15 +51,15 @@ struct Arguments {
     trans_b: u32,
 
     /// m
-    #[argh(option, default = "10000", short = 'm')]
+    #[argh(option, short = 'm', default = "10000")]
     m: usize,
 
     /// n
-    #[argh(option, default = "10000", short = 'n')]
+    #[argh(option, short = 'n', default = "10000")]
     n: usize,
 
     /// k
-    #[argh(option, default = "10000", short = 'k')]
+    #[argh(option, short = 'k', default = "10000")]
     k: usize,
 
     /// alpha
@@ -69,6 +69,26 @@ struct Arguments {
     /// beta
     #[argh(option, default = "1.0")]
     beta: f64,
+}
+
+#[inline(always)]
+fn ns_to_ms(ns: u128) -> f64 {
+    ns as f64 / 1000.0 / 1000.0
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+struct Duration(u128);
+
+impl Duration {
+    #[inline(always)]
+    fn as_nanos(&self) -> u128 {
+        self.0
+    }
+
+    #[inline(always)]
+    fn as_milis(&self) -> f64 {
+        ns_to_ms(self.0)
+    }
 }
 
 struct Kernel<'a>(
@@ -108,7 +128,7 @@ impl<'a> Kernel<'a> {
         ldc: usize,
         alpha: f64,
         beta: f64,
-    ) -> time::Duration {
+    ) -> Duration {
         let a = a.as_ptr();
         let b = b.as_ptr();
         let c = c.as_mut_ptr();
@@ -119,7 +139,8 @@ impl<'a> Kernel<'a> {
                 layout, trans_a, trans_b, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc,
             );
         }
-        time::Instant::now() - start_time
+        let end_time = time::Instant::now();
+        Duration((end_time - start_time).as_nanos())
     }
 }
 
@@ -169,67 +190,56 @@ fn prepare(chunk_size: usize, size: usize, seed: u64, min: f64, max: f64) -> Box
     matrix
 }
 
-#[inline(always)]
-fn ns_to_ms(ns: u128) -> f64 {
-    ns as f64 / 1000.0 / 1000.0
-}
-
 struct Statistics {
-    medium: u128,
+    medium: Duration,
+    maximum: Duration,
+    minimum: Duration,
     average: u128,
-    maximum: u128,
-    minimum: u128,
     deviation: f64,
 }
 
-impl Statistics {
-    fn from(mut records: Vec<u128>) -> Statistics {
-        records.par_sort();
-        let medium = records[records.len() / 2];
-        let average = records.par_iter().sum::<u128>() / records.len() as u128;
-        let maximum = *records.last().unwrap();
-        let minimum = *records.first().unwrap();
+impl From<&Vec<Duration>> for Statistics {
+    fn from(records: &Vec<Duration>) -> Self {
+        assert_ne!(records.len(), 0);
+        let sorted = {
+            let mut sorted = records.iter().collect::<Vec<&Duration>>();
+            sorted.sort();
+            sorted
+        };
+        let medium = *sorted[sorted.len() / 2];
+        let maximum = **unsafe { sorted.last().unwrap_unchecked() };
+        let minimum = **unsafe { sorted.first().unwrap_unchecked() };
+        let average =
+            records.par_iter().map(|x| x.as_nanos()).sum::<u128>() / records.len() as u128;
         let deviation = (records
             .iter()
-            .map(|&x| ns_to_ms(x.abs_diff(average)).powi(2))
-            .fold(0.0, |acc, x| acc + x)
+            .map(|x| ns_to_ms(x.as_nanos().abs_diff(average)).powi(2))
+            .sum::<f64>()
             / records.len() as f64)
             .sqrt();
         Statistics {
             medium,
-            average,
             maximum,
             minimum,
+            average,
             deviation,
         }
-    }
-
-    #[inline]
-    fn medium_as_ms(&self) -> f64 {
-        ns_to_ms(self.medium)
-    }
-
-    #[inline]
-    fn average_as_ms(&self) -> f64 {
-        ns_to_ms(self.average)
-    }
-
-    #[inline]
-    fn maximum_as_ms(&self) -> f64 {
-        ns_to_ms(self.maximum)
-    }
-
-    #[inline]
-    fn minimum_as_ms(&self) -> f64 {
-        ns_to_ms(self.minimum)
     }
 }
 
 /// ???
 static CHUNK_SIZE: usize = 2048;
 
+fn check_args(args: &Arguments) {
+    if args.repeats == 0 {
+        eprintln!("Error: repeats should be signed integer that is not 0");
+        process::exit(1)
+    }
+}
+
 fn main() {
     let args: Arguments = argh::from_env();
+    check_args(&args);
 
     if fs::File::open(&args.out)
         .and_then(|out| {
@@ -274,7 +284,7 @@ fn main() {
     let mut c = unsafe { malloc::<f64>(m * n) };
 
     println!("M: {}, N: {}, K: {}", m, n, k);
-    println!("alpha: {}, beta: {}", args.alpha, args.beta);
+    println!("alpha: {:.4}, beta: {:.4}", args.alpha, args.beta);
 
     let layout = CBLAS_LAYOUT::try_from(args.layout.to_uppercase().as_str())
         .expect("Error: unexpected value for layout");
@@ -307,13 +317,11 @@ fn main() {
 
     let mut records = Vec::with_capacity(args.repeats);
     for i in 0..args.repeats {
-        let duration = kernel
-            .run(
-                layout, trans_a, trans_b, dimensions, &a, lda, &b, ldb, &mut c, ldc, args.alpha,
-                args.beta,
-            )
-            .as_nanos();
-        println!("Duration: {:.6}ms", ns_to_ms(duration));
+        let duration = kernel.run(
+            layout, trans_a, trans_b, dimensions, &a, lda, &b, ldb, &mut c, ldc, args.alpha,
+            args.beta,
+        );
+        println!("Duration: {:.6}ms", duration.as_milis());
         records.push(duration);
 
         if i == 0 && !args.skip_verification {
@@ -346,27 +354,36 @@ fn main() {
             }
         }
     }
+    let records = records;
 
-    let statistics = Statistics::from(records);
+    let statistics = Statistics::from(&records);
     println!(
         "Medium\t {:.6}ms \t {}",
-        statistics.medium_as_ms(),
-        2.0 * (m * n * k) as f64 / statistics.medium as f64
+        statistics.medium.as_milis(),
+        2.0 * (m * n * k) as f64 / statistics.medium.as_nanos() as f64
     );
-    println!("Average\t {:.6}ms", statistics.average_as_ms());
+    println!("Average\t {:.6}ms", ns_to_ms(statistics.average));
     println!(
         "Worst\t {:.6}ms \t {}",
-        statistics.maximum_as_ms(),
-        2.0 * (m * n * k) as f64 / statistics.maximum as f64
+        statistics.maximum.as_milis(),
+        2.0 * (m * n * k) as f64 / statistics.maximum.as_nanos() as f64
     );
     println!(
         "Best\t {:.6}ms \t {}",
-        statistics.minimum_as_ms(),
-        2.0 * (m * n * k) as f64 / statistics.minimum as f64
+        statistics.minimum.as_milis(),
+        2.0 * (m * n * k) as f64 / statistics.minimum.as_nanos() as f64
     );
     println!("Deviation\t {}", statistics.deviation);
 
-    if let Some(_) = args.save_as.and_then(|x| fs::File::create(x).ok()) {
-        // TODO
+    if let Some(mut file) = args.save_as.and_then(|x| fs::File::create(x).ok()) {
+        file.write_all(
+            records
+                .into_iter()
+                .map(|x| format!("{:.6}", x.as_milis()))
+                .collect::<Vec<String>>()
+                .join("\n")
+                .as_bytes(),
+        )
+        .expect("Error: failed to save benchmark result.");
     }
 }
