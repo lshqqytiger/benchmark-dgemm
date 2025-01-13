@@ -2,7 +2,10 @@ use argh::FromArgs;
 use armpl_sys::{
     armpl_int_t, cblas_daxpy, cblas_dgemm, cblas_dnrm2, CBLAS_LAYOUT, CBLAS_TRANSPOSE,
 };
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use rayon::{
+    iter::{IntoParallelRefIterator, ParallelIterator},
+    slice::ParallelSliceMut,
+};
 use std::{ffi::c_double, fs, io::Write, process, sync, time};
 
 #[derive(FromArgs)]
@@ -170,8 +173,8 @@ impl From<&Vec<Duration>> for Statistics {
     fn from(records: &Vec<Duration>) -> Self {
         assert_ne!(records.len(), 0);
         let sorted = {
-            let mut sorted = records.iter().collect::<Vec<&Duration>>();
-            sorted.sort();
+            let mut sorted = records.par_iter().collect::<Vec<&Duration>>();
+            sorted.par_sort();
             sorted
         };
         let medium = *sorted[sorted.len() / 2];
@@ -180,7 +183,7 @@ impl From<&Vec<Duration>> for Statistics {
         let average =
             records.par_iter().map(|x| x.as_nanos()).sum::<u128>() / records.len() as u128;
         let deviation = (records
-            .iter()
+            .par_iter()
             .map(|x| ns_to_ms(x.as_nanos().abs_diff(average)).powi(2))
             .sum::<f64>()
             / records.len() as f64)
