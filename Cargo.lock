@@ -39,20 +39,17 @@ name = "armpl-sys"
 version = "0.1.0"
 
 [[package]]
-name = "benchmark"
-version = "0.1.0"
-dependencies = [
- "argh",
- "armpl-sys",
- "libloading",
- "rayon",
-]
-
-[[package]]
 name = "cfg-if"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
+
+[[package]]
+name = "common"
+version = "0.1.0"
+dependencies = [
+ "rayon",
+]
 
 [[package]]
 name = "crossbeam-deque"
@@ -168,6 +165,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "tools"
+version = "0.1.0"
+dependencies = [
+ "argh",
+ "armpl-sys",
+ "common",
+ "libloading",
+ "rayon",
 ]
 
 [[package]]

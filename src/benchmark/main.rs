@@ -2,11 +2,8 @@ use argh::FromArgs;
 use armpl_sys::{
     armpl_int_t, cblas_daxpy, cblas_dgemm, cblas_dnrm2, CBLAS_LAYOUT, CBLAS_TRANSPOSE,
 };
-use rayon::{
-    iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator},
-    slice::ParallelSliceMut,
-};
-use std::{ffi::c_double, fs, io::Write, process, time};
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use std::{ffi::c_double, fs, io::Write, process, sync, time};
 
 #[derive(FromArgs)]
 /// arguments
@@ -15,8 +12,9 @@ struct Arguments {
     #[argh(positional)]
     kernel: String,
 
+    /// path to compiled binary
     #[argh(positional)]
-    out: String,
+    out: Option<String>,
 
     /// save benchmark result as
     #[argh(option)]
@@ -91,9 +89,9 @@ impl Duration {
     }
 }
 
-struct Kernel<'a>(
+struct Kernel<'lib>(
     libloading::Symbol<
-        'a,
+        'lib,
         unsafe extern "C" fn(
             layout: CBLAS_LAYOUT,
             TransA: CBLAS_TRANSPOSE,
@@ -113,7 +111,7 @@ struct Kernel<'a>(
     >,
 );
 
-impl<'a> Kernel<'a> {
+impl<'lib> Kernel<'lib> {
     fn run(
         &self,
         layout: CBLAS_LAYOUT,
@@ -144,11 +142,6 @@ impl<'a> Kernel<'a> {
     }
 }
 
-#[inline(always)]
-unsafe fn malloc<T>(size: usize) -> Box<[T]> {
-    Box::<[T]>::new_uninit_slice(size).assume_init()
-}
-
 fn build(compiler: String, kernel: &String, out: &String) -> process::ExitStatus {
     let mut compiler = process::Command::new(compiler)
         .args(["-O3", "-mcpu=native"])
@@ -163,31 +156,6 @@ fn build(compiler: String, kernel: &String, out: &String) -> process::ExitStatus
     compiler
         .wait()
         .expect("Error: failed to wait compiler exit")
-}
-
-/// Originally written by Enoch Jung in C.
-fn prepare(chunk_size: usize, size: usize, seed: u64, min: f64, max: f64) -> Box<[f64]> {
-    let mul = 192499u64;
-    let add = 6837199u64;
-
-    let scaling_factor = (max - min) / (u64::MAX as f64);
-    let mut matrix = unsafe { malloc::<f64>(size) };
-    matrix
-        .par_chunks_mut(chunk_size)
-        .enumerate()
-        .for_each(|(tid, chunk)| {
-            let mut value = (tid as u64 * 1034871 + 10581) * seed;
-
-            for _ in 0..(50 + tid as u64) {
-                value = value.wrapping_mul(mul).wrapping_add(add);
-            }
-
-            for cell in chunk.iter_mut() {
-                value = value.wrapping_mul(mul).wrapping_add(add);
-                *cell = (value as f64) * scaling_factor + min;
-            }
-        });
-    matrix
 }
 
 struct Statistics {
@@ -227,9 +195,6 @@ impl From<&Vec<Duration>> for Statistics {
     }
 }
 
-/// ???
-static CHUNK_SIZE: usize = 2048;
-
 fn check_args(args: &Arguments) {
     if args.repeats == 0 {
         eprintln!("Error: repeats should be signed integer that is not 0");
@@ -237,11 +202,14 @@ fn check_args(args: &Arguments) {
     }
 }
 
+static FILENAME_TEMP: sync::LazyLock<String> = sync::LazyLock::new(|| ".temp".to_string());
+
 fn main() {
     let args: Arguments = argh::from_env();
     check_args(&args);
 
-    if fs::File::open(&args.out)
+    let out = args.out.as_ref().unwrap_or(&*FILENAME_TEMP);
+    if fs::File::open(out)
         .and_then(|out| {
             let source = fs::File::open(&args.kernel)
                 .expect("Error: kernel not found!")
@@ -264,14 +232,14 @@ fn main() {
             true
         })
     {
-        if !build(args.compiler, &args.kernel, &args.out).success() {
+        if !build(args.compiler, &args.kernel, out).success() {
             eprintln!("Error: compilation failed!");
             process::exit(1)
         }
     }
 
-    let library = unsafe { libloading::Library::new(args.out) }
-        .expect("Error: failed to load compiled object");
+    let library =
+        unsafe { libloading::Library::new(out) }.expect("Error: failed to load compiled object");
     let kernel = Kernel(
         unsafe { library.get(b"call_dgemm") }
             .expect("Error: compiled object does not contain symbol call_dgemm"),
@@ -279,9 +247,9 @@ fn main() {
 
     let dimensions = (args.m, args.n, args.k);
     let (m, n, k) = dimensions;
-    let a = prepare(CHUNK_SIZE, m * k, 100, 0.0, 2.0);
-    let b = prepare(CHUNK_SIZE, k * n, 200, 0.0, 2.0);
-    let mut c = unsafe { malloc::<f64>(m * n) };
+    let a = common::fill_rand(m * k, 100, 0.0, 2.0);
+    let b = common::fill_rand(k * n, 200, 0.0, 2.0);
+    let mut c = unsafe { common::malloc::<f64>(m * n) };
 
     println!("M: {}, N: {}, K: {}", m, n, k);
     println!("alpha: {:.4}, beta: {:.4}", args.alpha, args.beta);
@@ -326,7 +294,7 @@ fn main() {
 
         if i == 0 && !args.skip_verification {
             let difference = unsafe {
-                let mut d = malloc::<f64>(m * n);
+                let mut d = common::malloc::<f64>(m * n);
                 cblas_dgemm(
                     layout,
                     trans_a,
@@ -354,7 +322,12 @@ fn main() {
             }
         }
     }
+    drop(library.close());
     let records = records;
+
+    if args.out.is_none() {
+        drop(fs::remove_file(&*FILENAME_TEMP));
+    }
 
     let statistics = Statistics::from(&records);
     println!(

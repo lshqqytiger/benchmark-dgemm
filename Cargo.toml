@@ -1,10 +1,19 @@
 [package]
-name = "benchmark"
+name = "tools"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+common = { path = "./common" }
 armpl-sys = { path = "./armpl-sys" }
 argh = "0.1.13"
 libloading = "0.8.6"
 rayon = "1.10.0"
+
+[[bin]]
+name = "benchmark"
+path = "src/benchmark/main.rs"
+
+[[bin]]
+name = "profile"
+path = "src/profile/main.rs"
