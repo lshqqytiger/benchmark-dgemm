@@ -39,6 +39,17 @@ name = "armpl-sys"
 version = "0.1.0"
 
 [[package]]
+name = "benchmark"
+version = "0.1.0"
+dependencies = [
+ "argh",
+ "armpl-sys",
+ "common",
+ "libloading",
+ "rayon",
+]
+
+[[package]]
 name = "cfg-if"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -100,6 +111,10 @@ checksum = "37d3544b3f2748c54e147655edb5025752e2303145b5aefb3c3ea2c78b973bb0"
 dependencies = [
  "unicode-ident",
 ]
+
+[[package]]
+name = "profile"
+version = "0.1.0"
 
 [[package]]
 name = "quote"
@@ -165,17 +180,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
-]
-
-[[package]]
-name = "tools"
-version = "0.1.0"
-dependencies = [
- "argh",
- "armpl-sys",
- "common",
- "libloading",
- "rayon",
 ]
 
 [[package]]

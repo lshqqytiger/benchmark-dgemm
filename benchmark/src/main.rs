@@ -8,6 +8,19 @@ use rayon::{
 };
 use std::{ffi::c_double, fs, io::Write, process, sync, time};
 
+trait IsErrOr<T> {
+    fn is_err_or(self, f: impl FnOnce(T) -> bool) -> bool;
+}
+
+impl<T, E> IsErrOr<T> for Result<T, E> {
+    fn is_err_or(self, f: impl FnOnce(T) -> bool) -> bool {
+        match self {
+            Ok(t) => f(t),
+            Err(_) => true,
+        }
+    }
+}
+
 #[derive(FromArgs)]
 /// arguments
 struct Arguments {
@@ -152,8 +165,8 @@ fn build(compiler: String, kernel: &String, out: &String) -> process::ExitStatus
         .args(["-armpl", "-lm", "-lnuma"])
         .args(["-Wall", "-Werror"])
         .arg("-shared")
-        .args(["-o", &out])
-        .arg(&kernel)
+        .args(["-o", out])
+        .arg(kernel)
         .spawn()
         .expect("Error: failed to run compiler");
     compiler
@@ -211,34 +224,38 @@ fn main() {
     let args: Arguments = argh::from_env();
     check_args(&args);
 
-    let out = args.out.as_ref().unwrap_or(&*FILENAME_TEMP);
-    if fs::File::open(out)
-        .and_then(|out| {
-            let source = fs::File::open(&args.kernel)
-                .expect("Error: kernel not found!")
-                .metadata()
-                .expect("Error: failed to query metadata");
-            Ok(args.compile.unwrap_or(
-                source.accessed().expect("Error: unsupported platform")
-                    > out
-                        .metadata()
-                        .expect("Error: failed to query metadata")
-                        .created()
-                        .expect("Error: unsupported platform"),
-            ))
-        })
-        .unwrap_or_else(|_| {
+    // these parts look really ugly, but they do what should be done.
+    let (out, compile) = args.out.as_ref().map_or_else(
+        || {
             if args.compile.is_some_and(|x| !x) {
-                eprintln!("Error: could not find compiled object");
-                process::exit(1)
+                (&args.kernel, false)
+            } else {
+                (&*FILENAME_TEMP, true)
             }
-            true
-        })
-    {
-        if !build(args.compiler, &args.kernel, out).success() {
-            eprintln!("Error: compilation failed!");
-            process::exit(1)
-        }
+        },
+        |out| {
+            (
+                out,
+                args.compile.unwrap_or_else(|| {
+                    fs::File::open(out).is_err_or(|out| {
+                        let source = fs::File::open(&args.kernel)
+                            .expect("Error: kernel not found")
+                            .metadata()
+                            .expect("Error: failed to query metadata");
+                        source.accessed().expect("Error: unsupported platform")
+                            > out
+                                .metadata()
+                                .expect("Error: failed to query metadata")
+                                .created()
+                                .expect("Error: unsupported platform")
+                    })
+                }),
+            )
+        },
+    );
+    if compile && !build(args.compiler, &args.kernel, out).success() {
+        eprintln!("Error: compilation failed");
+        process::exit(1)
     }
 
     let library =
@@ -320,7 +337,7 @@ fn main() {
                 cblas_dnrm2(n, d.as_ptr(), 1)
             };
             if difference > 0.0001 {
-                println!("WRONG RESULT!");
+                eprintln!("WRONG RESULT!");
                 process::exit(1)
             }
         }
@@ -328,7 +345,7 @@ fn main() {
     drop(library.close());
     let records = records;
 
-    if args.out.is_none() {
+    if out.as_ptr() == FILENAME_TEMP.as_ptr() {
         drop(fs::remove_file(&*FILENAME_TEMP));
     }
 
@@ -360,6 +377,6 @@ fn main() {
                 .join("\n")
                 .as_bytes(),
         )
-        .expect("Error: failed to save benchmark result.");
+        .expect("Error: failed to save benchmark result");
     }
 }
