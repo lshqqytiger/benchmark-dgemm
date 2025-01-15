@@ -225,18 +225,29 @@ fn main() {
     check_args(&args);
 
     // these parts look really ugly, but they do what should be done.
+    // out=Some, compile=Some(true) => build(out) then run(out),
+    // out=Some, compile=Some(false) => run(out),
+    // out=Some, compile=None => auto then run(out),
+    // out=None, compile=Some(true) => build(".temp") then run(".temp"),
+    // out=None, compile=Some(false) => run(kernel),
+    // out=None, compile=None => build(".temp") then run(".temp"),
     let (out, compile) = args.out.as_ref().map_or_else(
         || {
+            // out=None
             if args.compile.is_some_and(|x| !x) {
+                // compile=Some(false)
                 (&args.kernel, false)
             } else {
+                // compile=Some(true) or compile=None
                 (&*FILENAME_TEMP, true)
             }
         },
         |out| {
+            // out=Some
             (
                 out,
                 args.compile.unwrap_or_else(|| {
+                    // compile or auto
                     fs::File::open(out).is_err_or(|out| {
                         let source = fs::File::open(&args.kernel)
                             .expect("Error: kernel not found")
