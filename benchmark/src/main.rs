@@ -159,29 +159,39 @@ impl<'lib> Kernel<'lib> {
 }
 
 trait Average<T> {
-    fn average(&self) -> T;
+    fn average(&self) -> Option<T>;
 }
 
 impl Average<f64> for Vec<f64> {
     /// Calculate average without overflow.
-    #[inline(always)]
-    fn average(&self) -> f64 {
-        let n = self.len() / 2;
-        if n == 1 && self.len() % 2 == 0 {
-            return self[0] / 2.0 + self[1] / 2.0;
+    fn average(&self) -> Option<f64> {
+        if self.is_empty() {
+            return None;
         }
+
+        let n = self.len() / 2;
+        if n == 1 {
+            return Some(if self.len() % 2 == 0 {
+                self[0] / 2.0 + self[1] / 2.0
+            } else {
+                self[0]
+            });
+        }
+
         let average = (0..n)
             .into_par_iter()
             .map(|i| self[i * 2] / 2.0 + self[i * 2 + 1] / 2.0)
             .collect::<Vec<f64>>()
-            .average();
-        if self.len() % 2 == 1 {
+            .average()
+            .unwrap();
+
+        Some(if self.len() % 2 == 1 {
             // from "average = partial_average * ((n - 1) / n) + ((last + average) / 2) * (1 / n)"
             (average * (2 * n) as f64 + unsafe { self.last().unwrap_unchecked() })
                 / (2 * n + 1) as f64
         } else {
             average
-        }
+        })
     }
 }
 
@@ -210,13 +220,19 @@ impl From<&Vec<Duration>> for Statistics {
             .par_iter()
             .map(|x| x.as_milis())
             .collect::<Vec<f64>>();
-        let average = vec.average();
-        let deviation = vec
-            .into_par_iter()
-            .map(|x| (x - average).powi(2))
-            .collect::<Vec<f64>>()
-            .average()
-            .sqrt();
+        let average = {
+            let average = vec.average();
+            unsafe { average.unwrap_unchecked() }
+        };
+        let deviation = {
+            let variances = vec
+                .into_par_iter()
+                .map(|x| (x - average).powi(2))
+                .collect::<Vec<f64>>();
+            let average = variances.average();
+            unsafe { average.unwrap_unchecked() }.sqrt()
+        };
+
         Statistics {
             medium,
             maximum,
