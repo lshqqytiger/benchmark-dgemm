@@ -1,12 +1,9 @@
+mod common;
 use argh::FromArgs;
 use armpl_sys::{
     armpl_int_t, cblas_daxpy, cblas_dgemm, cblas_dnrm2, CBLAS_LAYOUT, CBLAS_TRANSPOSE,
 };
-use rayon::{
-    iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator},
-    slice::ParallelSliceMut,
-};
-use std::{ffi::c_double, fs, io::Write, process, sync, time};
+use std::{ffi::c_double, fs, io::Write, path, process, sync, time};
 
 trait IsErrOr<T> {
     fn is_err_or(self, f: impl FnOnce(T) -> bool) -> bool;
@@ -32,9 +29,13 @@ struct Arguments {
     #[argh(positional)]
     out: Option<String>,
 
-    /// save benchmark result as
+    /// save benchmark result
     #[argh(option)]
     save_as: Option<String>,
+
+    /// save benchmark history
+    #[argh(option)]
+    save_history_as: Option<String>,
 
     /// not present: auto, true: recompile anyway, false: don't recompile
     #[argh(option)]
@@ -85,26 +86,6 @@ struct Arguments {
     beta: f64,
 }
 
-#[inline(always)]
-fn ns_to_ms(ns: u128) -> f64 {
-    ns as f64 / 1000.0 / 1000.0
-}
-
-#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
-struct Duration(u128);
-
-impl Duration {
-    #[inline(always)]
-    fn as_nanos(&self) -> u128 {
-        self.0
-    }
-
-    #[inline(always)]
-    fn as_milis(&self) -> f64 {
-        ns_to_ms(self.0)
-    }
-}
-
 struct Kernel<'lib>(
     libloading::Symbol<
         'lib,
@@ -142,7 +123,7 @@ impl<'lib> Kernel<'lib> {
         ldc: usize,
         alpha: f64,
         beta: f64,
-    ) -> Duration {
+    ) -> common::Duration {
         let a = a.as_ptr();
         let b = b.as_ptr();
         let c = c.as_mut_ptr();
@@ -154,92 +135,7 @@ impl<'lib> Kernel<'lib> {
             );
         }
         let end_time = time::Instant::now();
-        Duration((end_time - start_time).as_nanos())
-    }
-}
-
-trait Average<T> {
-    fn average(&self) -> Option<T>;
-}
-
-impl Average<f64> for Vec<f64> {
-    /// Calculate average without overflow.
-    fn average(&self) -> Option<f64> {
-        if self.is_empty() {
-            return None;
-        }
-
-        let n = self.len() / 2;
-        if n == 1 {
-            return Some(if self.len() % 2 == 0 {
-                self[0] / 2.0 + self[1] / 2.0
-            } else {
-                self[0]
-            });
-        }
-
-        let average = (0..n)
-            .into_par_iter()
-            .map(|i| self[i * 2] / 2.0 + self[i * 2 + 1] / 2.0)
-            .collect::<Vec<f64>>()
-            .average()
-            .unwrap();
-
-        Some(if self.len() % 2 == 1 {
-            // from "average = partial_average * ((n - 1) / n) + ((last + average) / 2) * (1 / n)"
-            (average * (2 * n) as f64 + unsafe { self.last().unwrap_unchecked() })
-                / (2 * n + 1) as f64
-        } else {
-            average
-        })
-    }
-}
-
-struct Statistics {
-    medium: Duration,
-    maximum: Duration,
-    minimum: Duration,
-    average: f64,
-    deviation: f64,
-}
-
-impl From<&Vec<Duration>> for Statistics {
-    fn from(records: &Vec<Duration>) -> Self {
-        assert_ne!(records.len(), 0);
-
-        let vec = {
-            let mut sorted = records.par_iter().collect::<Vec<&Duration>>();
-            sorted.par_sort();
-            sorted
-        };
-        let medium = *vec[vec.len() / 2];
-        let maximum = **unsafe { vec.last().unwrap_unchecked() };
-        let minimum = **unsafe { vec.first().unwrap_unchecked() };
-
-        let vec = records
-            .par_iter()
-            .map(|x| x.as_milis())
-            .collect::<Vec<f64>>();
-        let average = {
-            let average = vec.average();
-            unsafe { average.unwrap_unchecked() }
-        };
-        let deviation = {
-            let variances = vec
-                .into_par_iter()
-                .map(|x| (x - average).powi(2))
-                .collect::<Vec<f64>>();
-            let average = variances.average();
-            unsafe { average.unwrap_unchecked() }.sqrt()
-        };
-
-        Statistics {
-            medium,
-            maximum,
-            minimum,
-            average,
-            deviation,
-        }
+        common::Duration((end_time - start_time).as_nanos())
     }
 }
 
@@ -326,21 +222,18 @@ fn main() {
 
     let dimensions = (args.m, args.n, args.k);
     let (m, n, k) = dimensions;
-    let a = common::fill_rand(m * k, 100, 0.0, 2.0);
-    let b = common::fill_rand(k * n, 200, 0.0, 2.0);
-    let mut c = unsafe { common::malloc::<f64>(m * n) };
-
     println!("M: {}, N: {}, K: {}", m, n, k);
     println!("alpha: {:.4}, beta: {:.4}", args.alpha, args.beta);
 
     let layout = CBLAS_LAYOUT::try_from(args.layout.to_uppercase().as_str())
         .expect("Error: unexpected value for layout");
-    let (trans_a, trans_b) = (
+    println!("Layout: {}", layout);
+
+    let transpose = (
         CBLAS_TRANSPOSE::try_from(args.trans_a).expect("Error: unexpected value for transpose"),
         CBLAS_TRANSPOSE::try_from(args.trans_b).expect("Error: unexpected value for transpose"),
     );
-
-    println!("Layout: {}", layout);
+    let (trans_a, trans_b) = transpose;
     println!("TransA: {}", trans_a == CBLAS_TRANSPOSE::CblasTrans);
     println!("TransB: {}", trans_b == CBLAS_TRANSPOSE::CblasTrans);
 
@@ -362,6 +255,10 @@ fn main() {
         m
     };
 
+    let a = utils::fill_rand(m * k, 100, 0.0, 2.0);
+    let b = utils::fill_rand(k * n, 200, 0.0, 2.0);
+    let mut c = unsafe { utils::malloc::<f64>(m * n) };
+
     let mut records = Vec::with_capacity(args.repeats);
     for i in 0..args.repeats {
         let duration = kernel.run(
@@ -373,7 +270,7 @@ fn main() {
 
         if i == 0 && !args.skip_verification {
             let difference = unsafe {
-                let mut d = common::malloc::<f64>(m * n);
+                let mut d = utils::malloc::<f64>(m * n);
                 cblas_dgemm(
                     layout,
                     trans_a,
@@ -408,26 +305,31 @@ fn main() {
         drop(fs::remove_file(&*FILENAME_TEMP));
     }
 
-    let statistics = Statistics::from(&records);
-    println!(
-        "Medium\t {:.6}ms \t {}",
-        statistics.medium.as_milis(),
-        2.0 * (m * n * k) as f64 / statistics.medium.as_nanos() as f64
-    );
-    println!("Average\t {:.6}ms", statistics.average);
-    println!(
-        "Worst\t {:.6}ms \t {}",
-        statistics.maximum.as_milis(),
-        2.0 * (m * n * k) as f64 / statistics.maximum.as_nanos() as f64
-    );
-    println!(
-        "Best\t {:.6}ms \t {}",
-        statistics.minimum.as_milis(),
-        2.0 * (m * n * k) as f64 / statistics.minimum.as_nanos() as f64
-    );
-    println!("Deviation\t {}", statistics.deviation);
+    let report = common::Report {
+        name: path::PathBuf::from(args.kernel)
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string(),
+        dimensions,
+        alpha: args.alpha,
+        beta: args.beta,
+        layout,
+        transpose,
+        statistics: common::Statistics::from(&records),
+    };
+    println!("{}", report.summary().unwrap());
 
     if let Some(mut file) = args.save_as.and_then(|x| fs::File::create(x).ok()) {
+        file.write_all(
+            serde_json::to_string(&report)
+                .expect("Error: failed to serialize")
+                .as_bytes(),
+        )
+        .expect("Error: failed to save benchmark report");
+    }
+
+    if let Some(mut file) = args.save_history_as.and_then(|x| fs::File::create(x).ok()) {
         file.write_all(
             records
                 .into_iter()
@@ -436,6 +338,6 @@ fn main() {
                 .join("\n")
                 .as_bytes(),
         )
-        .expect("Error: failed to save benchmark result");
+        .expect("Error: failed to save benchmark history");
     }
 }

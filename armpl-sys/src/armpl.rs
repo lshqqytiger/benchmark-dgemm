@@ -13,7 +13,7 @@ impl CBLAS_LAYOUT {
     pub const CblasColMajor: CBLAS_LAYOUT = CBLAS_LAYOUT(102);
 }
 #[repr(transparent)]
-#[derive(Copy, Clone, Hash, PartialEq, Eq)]
+#[derive(Copy, Clone, Hash, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CBLAS_LAYOUT(pub ::std::os::raw::c_uint);
 impl CBLAS_TRANSPOSE {
     pub const CblasNoTrans: CBLAS_TRANSPOSE = CBLAS_TRANSPOSE(111);
@@ -25,7 +25,7 @@ impl CBLAS_TRANSPOSE {
     pub const CblasConjTrans: CBLAS_TRANSPOSE = CBLAS_TRANSPOSE(113);
 }
 #[repr(transparent)]
-#[derive(Copy, Clone, Hash, PartialEq, Eq)]
+#[derive(Copy, Clone, Hash, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CBLAS_TRANSPOSE(pub ::std::os::raw::c_uint);
 impl CBLAS_UPLO {
     pub const CblasUpper: CBLAS_UPLO = CBLAS_UPLO(121);
