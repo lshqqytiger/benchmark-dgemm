@@ -3,7 +3,7 @@ use armpl_sys::{
     armpl_int_t, cblas_daxpy, cblas_dgemm, cblas_dnrm2, CBLAS_LAYOUT, CBLAS_TRANSPOSE,
 };
 use rayon::{
-    iter::{IntoParallelRefIterator, ParallelIterator},
+    iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator},
     slice::ParallelSliceMut,
 };
 use std::{ffi::c_double, fs, io::Write, process, sync, time};
@@ -158,48 +158,64 @@ impl<'lib> Kernel<'lib> {
     }
 }
 
-fn build(compiler: String, kernel: &String, out: &String) -> process::ExitStatus {
-    let mut compiler = process::Command::new(compiler)
-        .args(["-O3", "-mcpu=native"])
-        .arg("-fopenmp")
-        .args(["-armpl", "-lm", "-lnuma"])
-        .args(["-Wall", "-Werror"])
-        .arg("-shared")
-        .args(["-o", out])
-        .arg(kernel)
-        .spawn()
-        .expect("Error: failed to run compiler");
-    compiler
-        .wait()
-        .expect("Error: failed to wait compiler exit")
+trait Average<T> {
+    fn average(&self) -> T;
+}
+
+impl Average<f64> for Vec<f64> {
+    /// Calculate average without overflow.
+    #[inline(always)]
+    fn average(&self) -> f64 {
+        let n = self.len() / 2;
+        if n == 1 && self.len() % 2 == 0 {
+            return self[0] / 2.0 + self[1] / 2.0;
+        }
+        let average = (0..n)
+            .into_par_iter()
+            .map(|i| self[i * 2] / 2.0 + self[i * 2 + 1] / 2.0)
+            .collect::<Vec<f64>>()
+            .average();
+        if self.len() % 2 == 1 {
+            // from "average = partial_average * ((n - 1) / n) + ((last + average) / 2) * (1 / n)"
+            (average * (2 * n) as f64 + unsafe { self.last().unwrap_unchecked() })
+                / (2 * n + 1) as f64
+        } else {
+            average
+        }
+    }
 }
 
 struct Statistics {
     medium: Duration,
     maximum: Duration,
     minimum: Duration,
-    average: u128,
+    average: f64,
     deviation: f64,
 }
 
 impl From<&Vec<Duration>> for Statistics {
     fn from(records: &Vec<Duration>) -> Self {
         assert_ne!(records.len(), 0);
-        let sorted = {
+
+        let vec = {
             let mut sorted = records.par_iter().collect::<Vec<&Duration>>();
             sorted.par_sort();
             sorted
         };
-        let medium = *sorted[sorted.len() / 2];
-        let maximum = **unsafe { sorted.last().unwrap_unchecked() };
-        let minimum = **unsafe { sorted.first().unwrap_unchecked() };
-        let average =
-            records.par_iter().map(|x| x.as_nanos()).sum::<u128>() / records.len() as u128;
-        let deviation = (records
+        let medium = *vec[vec.len() / 2];
+        let maximum = **unsafe { vec.last().unwrap_unchecked() };
+        let minimum = **unsafe { vec.first().unwrap_unchecked() };
+
+        let vec = records
             .par_iter()
-            .map(|x| ns_to_ms(x.as_nanos().abs_diff(average)).powi(2))
-            .sum::<f64>()
-            / records.len() as f64)
+            .map(|x| x.as_milis())
+            .collect::<Vec<f64>>();
+        let average = vec.average();
+        let deviation = vec
+            .into_par_iter()
+            .map(|x| (x - average).powi(2))
+            .collect::<Vec<f64>>()
+            .average()
             .sqrt();
         Statistics {
             medium,
@@ -216,6 +232,22 @@ fn check_args(args: &Arguments) {
         eprintln!("Error: repeats should be signed integer that is not 0");
         process::exit(1)
     }
+}
+
+fn build(compiler: String, kernel: &String, out: &String) -> process::ExitStatus {
+    let mut compiler = process::Command::new(compiler)
+        .args(["-O3", "-mcpu=native"])
+        .arg("-fopenmp")
+        .args(["-armpl", "-lm", "-lnuma"])
+        .args(["-Wall", "-Werror"])
+        .arg("-shared")
+        .args(["-o", out])
+        .arg(kernel)
+        .spawn()
+        .expect("Error: failed to run compiler");
+    compiler
+        .wait()
+        .expect("Error: failed to wait compiler exit")
 }
 
 static FILENAME_TEMP: sync::LazyLock<String> = sync::LazyLock::new(|| ".temp".to_string());
@@ -366,7 +398,7 @@ fn main() {
         statistics.medium.as_milis(),
         2.0 * (m * n * k) as f64 / statistics.medium.as_nanos() as f64
     );
-    println!("Average\t {:.6}ms", ns_to_ms(statistics.average));
+    println!("Average\t {:.6}ms", statistics.average);
     println!(
         "Worst\t {:.6}ms \t {}",
         statistics.maximum.as_milis(),
