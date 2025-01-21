@@ -10,7 +10,8 @@ pub struct UnexpectedValueError<T> {
 
 impl<T: fmt::Display> fmt::Debug for UnexpectedValueError<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_fmt(format_args!(
+        write!(
+            f,
             "expected one of [{}], but got {}",
             self.expected
                 .iter()
@@ -18,7 +19,7 @@ impl<T: fmt::Display> fmt::Debug for UnexpectedValueError<T> {
                 .collect::<Vec<String>>()
                 .join(", "),
             self.value
-        ))
+        )
     }
 }
 
