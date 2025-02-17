@@ -1,3 +1,13 @@
-[workspace]
-resolver = "2"
-members = ["benchmark", "profile"]
+[package]
+name = "benchmark"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+library = { path = "./library" }
+argh = "0.1.13"
+libloading = "0.8.6"
+rayon = "1.10.0"
+serde = "1.0.217"
+serde_json = "1.0.137"
+glob = "0.3.2"

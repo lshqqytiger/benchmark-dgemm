@@ -35,24 +35,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "armpl-sys"
-version = "0.1.0"
-dependencies = [
- "serde",
-]
-
-[[package]]
 name = "benchmark"
 version = "0.1.0"
 dependencies = [
  "argh",
- "armpl-sys",
  "glob",
  "libloading",
+ "library",
  "rayon",
  "serde",
  "serde_json",
- "utils",
 ]
 
 [[package]]
@@ -115,6 +107,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "library"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "memchr"
 version = "2.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -128,10 +127,6 @@ checksum = "37d3544b3f2748c54e147655edb5025752e2303145b5aefb3c3ea2c78b973bb0"
 dependencies = [
  "unicode-ident",
 ]
-
-[[package]]
-name = "profile"
-version = "0.1.0"
 
 [[package]]
 name = "quote"
@@ -222,13 +217,6 @@ name = "unicode-ident"
 version = "1.0.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "adb9e6ca4f869e1180728b7950e35922a7fc6397f7b641499e8f3ef06e50dc83"
-
-[[package]]
-name = "utils"
-version = "0.1.0"
-dependencies = [
- "rayon",
-]
 
 [[package]]
 name = "windows-targets"

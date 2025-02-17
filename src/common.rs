@@ -1,4 +1,4 @@
-use armpl_sys::{CBLAS_LAYOUT, CBLAS_TRANSPOSE};
+use library::{CBLAS_LAYOUT, CBLAS_TRANSPOSE};
 use rayon::{
     iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator},
     slice::ParallelSliceMut,

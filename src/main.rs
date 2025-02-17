@@ -1,8 +1,7 @@
 mod common;
+mod utils;
 use argh::FromArgs;
-use armpl_sys::{
-    armpl_int_t, cblas_daxpy, cblas_dgemm, cblas_dnrm2, CBLAS_LAYOUT, CBLAS_TRANSPOSE,
-};
+use library::{armpl_int_t, cblas_daxpy, cblas_dgemm, cblas_dnrm2, CBLAS_LAYOUT, CBLAS_TRANSPOSE};
 use std::{ffi::c_double, fs, io::Write, path, process, sync, time};
 
 trait IsErrOr<T> {
