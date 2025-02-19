@@ -89,7 +89,7 @@ impl Arguments {
         #[cfg(target_arch = "arm")]
         return String::from("armclang");
         #[cfg_attr(target_arch = "x86", target_arch = "x86_64")]
-        return String::from("/usr/bin/clang");
+        return String::from("clang");
     }
 }
 
