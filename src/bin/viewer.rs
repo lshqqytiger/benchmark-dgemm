@@ -1,5 +1,5 @@
-mod common;
 use argh::FromArgs;
+use benchmark::*;
 use std::{fs, io::Write, process};
 
 #[derive(FromArgs)]
@@ -34,13 +34,16 @@ fn main() {
     }
     let reports = reports;
 
-    let mut report = common::Report::new();
-    report.name = reports[0].name.clone();
-    report.dimensions = reports[0].dimensions;
-    report.alpha = reports[0].alpha;
-    report.beta = reports[0].beta;
-    report.layout = reports[0].layout;
-    report.transpose = reports[0].transpose;
+    let mut report = common::Report {
+        name: reports[0].name.clone(),
+        dimensions: reports[0].dimensions,
+        repeats: reports.iter().fold(0, |acc, x| acc + x.repeats),
+        alpha: reports[0].alpha,
+        beta: reports[0].beta,
+        layout: reports[0].layout,
+        transpose: reports[0].transpose,
+        statistics: common::Statistics::new(),
+    };
 
     for v in &reports[1..] {
         if v.dimensions != report.dimensions
@@ -74,13 +77,8 @@ fn main() {
         report.statistics.minimum = minimum;
     }
 
-    report.statistics.average = reports.iter().enumerate().fold(0.0, |acc, (i, report)| {
-        if i == 0 {
-            report.statistics.average
-        } else {
-            let i = i as f64;
-            acc / i * (i - 1.0) + report.statistics.average / i as f64
-        }
+    report.statistics.average = reports.iter().fold(0.0, |acc, x| {
+        acc + x.statistics.average * x.repeats as f64 / report.repeats as f64
     });
 
     // TODO: deviation

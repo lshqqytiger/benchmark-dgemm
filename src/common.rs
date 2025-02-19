@@ -7,22 +7,22 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Write};
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Serialize, Deserialize)]
-pub(crate) struct Duration(pub(crate) u128);
+pub struct Duration(pub u128);
 
 impl Duration {
-    pub(crate) const ZERO: Duration = Duration(0);
-    pub(crate) const MIN: Duration = Duration::ZERO;
-    pub(crate) const MAX: Duration = Duration(u128::MAX);
+    const ZERO: Duration = Duration(0);
+    pub const MIN: Duration = Duration::ZERO;
+    pub const MAX: Duration = Duration(u128::MAX);
 }
 
 impl Duration {
     #[inline(always)]
-    pub(crate) fn as_nanos(&self) -> u128 {
+    pub fn as_nanos(&self) -> u128 {
         self.0
     }
 
     #[inline(always)]
-    pub(crate) fn as_milis(&self) -> f64 {
+    pub fn as_milis(&self) -> f64 {
         self.0 as f64 / 1000.0 / 1000.0
     }
 }
@@ -65,7 +65,7 @@ impl Average<f64> for Vec<f64> {
 }
 
 #[derive(Serialize, Deserialize)]
-pub(crate) struct Statistics {
+pub struct Statistics {
     pub medium: Option<Duration>,
     pub maximum: Duration,
     pub minimum: Duration,
@@ -74,7 +74,7 @@ pub(crate) struct Statistics {
 }
 
 impl Statistics {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Statistics {
             medium: None,
             maximum: Duration::ZERO,
@@ -126,9 +126,10 @@ impl From<&Vec<Duration>> for Statistics {
 }
 
 #[derive(Serialize, Deserialize)]
-pub(crate) struct Report {
+pub struct Report {
     pub name: String,
     pub dimensions: (usize, usize, usize),
+    pub repeats: usize,
     pub alpha: f64,
     pub beta: f64,
     pub layout: CBLAS_LAYOUT,
@@ -137,21 +138,7 @@ pub(crate) struct Report {
 }
 
 impl Report {
-    pub(crate) fn new() -> Self {
-        Report {
-            name: "".to_string(),
-            dimensions: (0, 0, 0),
-            alpha: 1.0,
-            beta: 1.0,
-            layout: CBLAS_LAYOUT::CblasRowMajor,
-            transpose: (CBLAS_TRANSPOSE::CblasNoTrans, CBLAS_TRANSPOSE::CblasNoTrans),
-            statistics: Statistics::new(),
-        }
-    }
-}
-
-impl Report {
-    pub(crate) fn summary(&self) -> Result<String, fmt::Error> {
+    pub fn summary(&self) -> Result<String, fmt::Error> {
         let mut out = String::new();
         let ops = 2.0 * (self.dimensions.0 * self.dimensions.1 * self.dimensions.2) as f64;
         if let Some(medium) = self.statistics.medium {
@@ -179,7 +166,7 @@ impl Report {
         Ok(out)
     }
 
-    pub(crate) fn full(&self) -> Result<String, fmt::Error> {
+    pub fn full(&self) -> Result<String, fmt::Error> {
         let mut out = String::new();
         writeln!(&mut out, "=== {} ===", self.name)?;
         writeln!(

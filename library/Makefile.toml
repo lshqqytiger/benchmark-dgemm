@@ -1,11 +1,18 @@
 [tasks.bindgen]
+run_task = [
+    { name = "bindgen-armpl", condition = { env = { "CARGO_MAKE_RUST_TARGET_ARCH" = "arm" } } },
+    { name = "bindgen-mkl", condition = { env = { "CARGO_MAKE_RUST_TARGET_ARCH" = "x86" } } },
+    { name = "bindgen-mkl", condition = { env = { "CARGO_MAKE_RUST_TARGET_ARCH" = "x86_64" } } },
+]
+
+[tasks.bindgen-armpl]
 command = "bindgen"
 args = [
     "/opt/arm/armpl-24.10.0_Ubuntu-22.04_arm-linux-compiler/include/armpl.h",
     "-o",
-    "src/armpl.rs",
+    "src/armpl/armpl.rs",
     "--rust-target",
-    "1.82",
+    "1.84",
     "--no-layout-tests",
     "--no-derive-debug",
     "--default-enum-style=newtype",
@@ -18,6 +25,30 @@ args = [
     "--",
     "-I",
     "/opt/arm/armpl-24.10.0_Ubuntu-22.04_arm-linux-compiler/include",
+    "-x",
+    "c++",
+]
+
+[tasks.bindgen-mkl]
+command = "bindgen"
+args = [
+    "/usr/include/mkl/mkl_cblas.h",
+    "-o",
+    "src/mkl/cblas.rs",
+    "--rust-target",
+    "1.84",
+    "--no-layout-tests",
+    "--no-derive-debug",
+    "--default-enum-style=newtype",
+    "--allowlist-function",
+    "cblas.*",
+    "--allowlist-type",
+    "cblas.*",
+    "--allowlist-var",
+    "^CBLAS.*$",
+    "--",
+    "-I",
+    "/usr/include",
     "-x",
     "c++",
 ]

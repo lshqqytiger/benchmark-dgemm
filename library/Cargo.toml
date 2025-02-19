@@ -2,8 +2,12 @@
 name = "library"
 version = "0.1.0"
 edition = "2021"
+build = "build.rs"
 
 [lib]
 
 [dependencies]
 serde = "1.0.217"
+
+[build-dependencies]
+dotenv = "0.15.0"

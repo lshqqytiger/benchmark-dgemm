@@ -1,7 +1,6 @@
-mod common;
-mod utils;
 use argh::FromArgs;
-use library::{armpl_int_t, cblas_daxpy, cblas_dgemm, cblas_dnrm2, CBLAS_LAYOUT, CBLAS_TRANSPOSE};
+use benchmark::*;
+use library::{cblas_daxpy, cblas_dgemm, cblas_dnrm2, CBLAS_LAYOUT, CBLAS_TRANSPOSE};
 use std::{ffi::c_double, fs, io::Write, path, process, sync, time};
 
 trait IsErrOr<T> {
@@ -41,7 +40,7 @@ struct Arguments {
     compile: Option<bool>,
 
     /// compiler
-    #[argh(option, default = "String::from(\"armclang\")")]
+    #[argh(option, default = "Arguments::default_compiler()")]
     compiler: String,
 
     /// repeats
@@ -83,6 +82,15 @@ struct Arguments {
     /// beta
     #[argh(option, default = "1.0")]
     beta: f64,
+}
+
+impl Arguments {
+    fn default_compiler() -> String {
+        #[cfg(target_arch = "arm")]
+        return String::from("armclang");
+        #[cfg_attr(target_arch = "x86", target_arch = "x86_64")]
+        return String::from("/usr/bin/clang");
+    }
 }
 
 struct Kernel<'lib>(
@@ -145,18 +153,32 @@ fn check_args(args: &Arguments) {
     }
 }
 
+#[cfg(target_arch = "arm")]
+fn build_extra_args(command: &mut process::Command) {
+    command.arg("-armpl");
+    command.arg("-mcpu=native");
+}
+
+#[cfg_attr(target_arch = "x86", target_arch = "x86_64")]
+fn build_extra_args(command: &mut process::Command) {
+    command.args(["-lmkl_intel_lp64", "-lmkl_sequential", "-lmkl_core"]);
+    command.arg("-march=native");
+}
+
 fn build(compiler: String, kernel: &String, out: &String) -> process::ExitStatus {
-    let mut compiler = process::Command::new(compiler)
-        .args(["-O3", "-mcpu=native"])
-        .arg("-fopenmp")
-        .args(["-armpl", "-lm", "-lnuma"])
-        .args(["-Wall", "-Werror"])
-        .arg("-shared")
-        .args(["-o", out])
-        .arg(kernel)
+    let mut command = process::Command::new(compiler);
+    command.arg("-O3");
+    command.arg("-fopenmp");
+    command.args(["-lm", "-lnuma"]);
+    build_extra_args(&mut command);
+    command.args(["-Wall", "-Werror"]);
+    command.arg("-shared");
+    command.args(["-o", out]);
+    command.arg(kernel);
+    command.args(["-I", env!("PATH_INCLUDE")]);
+    command
         .spawn()
-        .expect("Error: failed to run compiler");
-    compiler
+        .expect("Error: failed to run compiler")
         .wait()
         .expect("Error: failed to wait compiler exit")
 }
@@ -287,7 +309,7 @@ fn main() {
                     ldc as _,
                 );
 
-                let n = (m * n) as armpl_int_t;
+                let n = (m * n) as _;
                 cblas_daxpy(n, -1.0, c.as_ptr(), 1, d.as_mut_ptr(), 1);
                 cblas_dnrm2(n, d.as_ptr(), 1)
             };
@@ -311,6 +333,7 @@ fn main() {
             .to_string_lossy()
             .to_string(),
         dimensions,
+        repeats: args.repeats,
         alpha: args.alpha,
         beta: args.beta,
         layout,
