@@ -22,7 +22,7 @@ fn link(path_compiler: String, path_library: String) {
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 fn link(path_compiler: String, path_library: String) {
     println!("cargo::rustc-link-lib=dylib=gomp");
-    println!("cargo::rustc-link-lib=dylib=blas64");
+    println!("cargo::rustc-link-lib=dylib=mkl_rt");
     println!("cargo::rustc-link-search=native={}/", path_compiler);
     println!("cargo::rustc-link-search=native={}/", path_library);
 }

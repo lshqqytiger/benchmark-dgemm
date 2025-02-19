@@ -161,7 +161,7 @@ fn build_extra_args(command: &mut process::Command) {
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 fn build_extra_args(command: &mut process::Command) {
-    command.args(["-lmkl_intel_lp64", "-lmkl_sequential", "-lmkl_core"]);
+    command.arg("-lmkl_rt");
     command.arg("-march=native");
 }
 
