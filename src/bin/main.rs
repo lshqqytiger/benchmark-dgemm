@@ -175,6 +175,7 @@ fn build(compiler: String, kernel: &String, out: &String) -> process::ExitStatus
     command.arg("-shared");
     command.args(["-o", out]);
     command.arg(kernel);
+    command.args(["-L", env!("PATH_LIBRARY")]);
     command.args(["-I", env!("PATH_INCLUDE")]);
     command
         .spawn()
