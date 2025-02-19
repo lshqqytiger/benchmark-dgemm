@@ -153,7 +153,7 @@ fn check_args(args: &Arguments) {
     }
 }
 
-#[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
+#[cfg(target_arch = "aarch64")]
 fn build_extra_args(command: &mut process::Command) {
     command.arg("-armpl");
     command.arg("-mcpu=native");

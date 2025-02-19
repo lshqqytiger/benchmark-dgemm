@@ -10,7 +10,7 @@ fn main() {
     );
 }
 
-#[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
+#[cfg(target_arch = "aarch64")]
 fn link(path_compiler: String, path_library: String) {
     println!("cargo::rustc-link-lib=dylib=omp");
     println!("cargo::rustc-link-lib=dylib=flang");
