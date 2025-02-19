@@ -184,7 +184,7 @@ fn build(compiler: String, kernel: &String, out: &String) -> process::ExitStatus
         .expect("Error: failed to wait compiler exit")
 }
 
-static FILENAME_TEMP: sync::LazyLock<String> = sync::LazyLock::new(|| ".temp".to_string());
+static FILENAME_TEMP: sync::LazyLock<String> = sync::LazyLock::new(|| "./.temp".to_string());
 
 fn main() {
     let args: Arguments = argh::from_env();
