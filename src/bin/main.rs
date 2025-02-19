@@ -153,13 +153,13 @@ fn check_args(args: &Arguments) {
     }
 }
 
-#[cfg(target_arch = "arm")]
+#[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
 fn build_extra_args(command: &mut process::Command) {
     command.arg("-armpl");
     command.arg("-mcpu=native");
 }
 
-#[cfg_attr(target_arch = "x86", target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 fn build_extra_args(command: &mut process::Command) {
     command.args(["-lmkl_intel_lp64", "-lmkl_sequential", "-lmkl_core"]);
     command.arg("-march=native");

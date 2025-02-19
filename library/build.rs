@@ -10,7 +10,7 @@ fn main() {
     );
 }
 
-#[cfg(target_arch = "arm")]
+#[cfg(any(target_arch = "arm", target_arch = "aarch64"))]
 fn link(path_compiler: String, path_library: String) {
     println!("cargo::rustc-link-lib=dylib=omp");
     println!("cargo::rustc-link-lib=dylib=flang");
@@ -19,7 +19,7 @@ fn link(path_compiler: String, path_library: String) {
     println!("cargo::rustc-link-search=native={}/lib/", path_library);
 }
 
-#[cfg_attr(target_arch = "x86", target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 fn link(path_compiler: String, path_library: String) {
     println!("cargo::rustc-link-lib=dylib=gomp");
     println!("cargo::rustc-link-lib=dylib=blas64");
