@@ -1,4 +1,5 @@
 [tasks.bindgen]
+env_files = ["../.env"]
 run_task = [
     { name = "bindgen-armpl", condition = { env = { "CARGO_MAKE_RUST_TARGET_ARCH" = "arm" } } },
     { name = "bindgen-mkl", condition = { env = { "CARGO_MAKE_RUST_TARGET_ARCH" = "x86" } } },
@@ -8,7 +9,7 @@ run_task = [
 [tasks.bindgen-armpl]
 command = "bindgen"
 args = [
-    "/opt/arm/armpl-24.10.0_Ubuntu-22.04_arm-linux-compiler/include/armpl.h",
+    "${PATH_COMPILER}/include/armpl.h",
     "-o",
     "src/armpl/armpl.rs",
     "--rust-target",
@@ -24,7 +25,7 @@ args = [
     "^CBLAS.*$",
     "--",
     "-I",
-    "/opt/arm/armpl-24.10.0_Ubuntu-22.04_arm-linux-compiler/include",
+    "${PATH_COMPILER}/include",
     "-x",
     "c++",
 ]
@@ -32,7 +33,7 @@ args = [
 [tasks.bindgen-mkl]
 command = "bindgen"
 args = [
-    "/usr/include/mkl/mkl_cblas.h",
+    "${PATH_INCLUDE}/mkl_cblas.h",
     "-o",
     "src/mkl/cblas.rs",
     "--rust-target",
@@ -48,7 +49,7 @@ args = [
     "^CBLAS.*$",
     "--",
     "-I",
-    "/usr/include",
+    "${PATH_INCLUDE}/..",
     "-x",
     "c++",
 ]
