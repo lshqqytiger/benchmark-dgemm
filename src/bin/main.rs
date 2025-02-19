@@ -86,9 +86,9 @@ struct Arguments {
 
 impl Arguments {
     fn default_compiler() -> String {
-        #[cfg(target_arch = "arm")]
+        #[cfg(target_arch = "aarch64")]
         return String::from("armclang");
-        #[cfg_attr(target_arch = "x86", target_arch = "x86_64")]
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         return String::from("clang");
     }
 }
