@@ -16,32 +16,50 @@ impl<T, E> IsErrOr<T> for Result<T, E> {
     }
 }
 
+fn parse_boolean(value: &str) -> Result<bool, String> {
+    Ok(match value.to_uppercase().as_str() {
+        "TRUE" => true,
+        "FALSE" => false,
+        v => {
+            return Err(vec!["expected 'TRUE' or 'FALSE', but got '", v, "'"].concat());
+        }
+    })
+}
+
 #[derive(FromArgs)]
 /// arguments
 struct Arguments {
     /// path to kernel source file
-    #[argh(positional)]
+    #[argh(positional, arg_name = "path-to-kernel")]
     kernel: String,
 
     /// path to compiled binary
-    #[argh(positional)]
+    #[argh(positional, arg_name = "path-to-out-file")]
     out: Option<String>,
 
     /// save benchmark result
-    #[argh(option)]
+    #[argh(option, arg_name = "path-to-report-file")]
     save_as: Option<String>,
 
     /// save benchmark history
-    #[argh(option)]
+    #[argh(option, arg_name = "path-to-history-file")]
     save_history_as: Option<String>,
 
-    /// not present: auto, true: recompile anyway, false: don't recompile
-    #[argh(option)]
+    /// TRUE: recompile anyway, FALSE: don't recompile
+    #[argh(option, arg_name = "bool", from_str_fn(parse_boolean))]
     compile: Option<bool>,
 
     /// compiler
     #[argh(option, default = "Arguments::default_compiler()")]
     compiler: String,
+
+    /// compiler arguments
+    #[argh(option, arg_name = "argument")]
+    compiler_args: Option<String>,
+
+    /// TRUE: --compiler-args overrides default arguments inferred from system, FALSE: append mode
+    #[argh(option, arg_name = "bool", from_str_fn(parse_boolean))]
+    override_compiler_args: Option<bool>,
 
     /// repeats
     #[argh(option, short = 'r', default = "10")]
@@ -51,17 +69,32 @@ struct Arguments {
     #[argh(switch)]
     skip_verification: bool,
 
-    /// layout
-    #[argh(option, default = "String::from(\"ROW\")")]
-    layout: String,
+    /// layout; ROW: row-major, COL: col-major
+    #[argh(
+        option,
+        arg_name = "layout",
+        from_str_fn(CBLAS_LAYOUT::try_from),
+        default = "CBLAS_LAYOUT::CblasRowMajor"
+    )]
+    layout: CBLAS_LAYOUT,
 
-    /// transpose a
-    #[argh(option, default = "CBLAS_TRANSPOSE::CblasNoTrans.0")]
-    trans_a: u32,
+    /// transpose a; FALSE: not transposed, TRUE: transposed, CONJ: conjugate transposed
+    #[argh(
+        option,
+        arg_name = "trans",
+        from_str_fn(CBLAS_TRANSPOSE::try_from),
+        default = "CBLAS_TRANSPOSE::CblasNoTrans"
+    )]
+    trans_a: CBLAS_TRANSPOSE,
 
-    /// transpose b
-    #[argh(option, default = "CBLAS_TRANSPOSE::CblasNoTrans.0")]
-    trans_b: u32,
+    /// transpose b; FALSE: not transposed, TRUE: transposed, CONJ: conjugate transposed
+    #[argh(
+        option,
+        arg_name = "trans",
+        from_str_fn(CBLAS_TRANSPOSE::try_from),
+        default = "CBLAS_TRANSPOSE::CblasNoTrans"
+    )]
+    trans_b: CBLAS_TRANSPOSE,
 
     /// m
     #[argh(option, short = 'm', default = "10000")]
@@ -89,7 +122,7 @@ impl Arguments {
         #[cfg(target_arch = "aarch64")]
         return String::from("armclang");
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-        return String::from("clang");
+        return String::from("icc");
     }
 }
 
@@ -155,6 +188,8 @@ fn check_args(args: &Arguments) {
 
 #[cfg(target_arch = "aarch64")]
 fn build_extra_args(command: &mut process::Command) {
+    command.arg("-fopenmp");
+    command.arg("-lm");
     command.arg("-armpl");
     command.arg("-mcpu=native");
 }
@@ -165,18 +200,28 @@ fn build_extra_args(command: &mut process::Command) {
     command.arg("-march=native");
 }
 
-fn build(compiler: String, kernel: &String, out: &String) -> process::ExitStatus {
+fn build(
+    compiler: String,
+    compiler_args: Option<String>,
+    override_mode: bool,
+    kernel: &String,
+    out: &String,
+) -> process::ExitStatus {
     let mut command = process::Command::new(compiler);
-    command.arg("-O3");
-    command.arg("-fopenmp");
-    command.args(["-lm", "-lnuma"]);
-    build_extra_args(&mut command);
-    command.args(["-Wall", "-Werror"]);
-    command.arg("-shared");
-    command.args(["-o", out]);
-    command.arg(kernel);
-    command.args(["-L", env!("PATH_LIBRARY")]);
-    command.args(["-I", env!("PATH_INCLUDE")]);
+    if !override_mode {
+        command.arg("-O3");
+        command.arg("-lnuma");
+        build_extra_args(&mut command);
+        command.args(["-Wall", "-Werror"]);
+        command.arg("-shared");
+        command.args(["-o", out]);
+        command.arg(kernel);
+        command.args(["-L", env!("PATH_LIBRARY")]);
+        command.args(["-I", env!("PATH_INCLUDE")]);
+    }
+    if let Some(args) = compiler_args {
+        command.args(args.split_whitespace());
+    }
     command
         .spawn()
         .expect("Error: failed to run compiler")
@@ -230,7 +275,16 @@ fn main() {
             )
         },
     );
-    if compile && !build(args.compiler, &args.kernel, out).success() {
+    if compile
+        && !build(
+            args.compiler,
+            args.compiler_args,
+            args.override_compiler_args.unwrap_or(false),
+            &args.kernel,
+            out,
+        )
+        .success()
+    {
         eprintln!("Error: compilation failed");
         process::exit(1)
     }
@@ -246,32 +300,28 @@ fn main() {
     let (m, n, k) = dimensions;
     println!("M: {}, N: {}, K: {}", m, n, k);
     println!("alpha: {:.4}, beta: {:.4}", args.alpha, args.beta);
+    println!("Layout: {}", args.layout);
 
-    let layout = CBLAS_LAYOUT::try_from(args.layout.to_uppercase().as_str())
-        .expect("Error: unexpected value for layout");
-    println!("Layout: {}", layout);
-
-    let transpose = (
-        CBLAS_TRANSPOSE::try_from(args.trans_a).expect("Error: unexpected value for transpose"),
-        CBLAS_TRANSPOSE::try_from(args.trans_b).expect("Error: unexpected value for transpose"),
-    );
+    let transpose = (args.trans_a, args.trans_b);
     let (trans_a, trans_b) = transpose;
     println!("TransA: {}", trans_a == CBLAS_TRANSPOSE::CblasTrans);
     println!("TransB: {}", trans_b == CBLAS_TRANSPOSE::CblasTrans);
 
-    let lda = if (trans_a == CBLAS_TRANSPOSE::CblasTrans) != (layout == CBLAS_LAYOUT::CblasRowMajor)
+    let lda = if (trans_a == CBLAS_TRANSPOSE::CblasTrans)
+        != (args.layout == CBLAS_LAYOUT::CblasRowMajor)
     {
         k
     } else {
         m
     };
-    let ldb = if (trans_b == CBLAS_TRANSPOSE::CblasTrans) != (layout == CBLAS_LAYOUT::CblasRowMajor)
+    let ldb = if (trans_b == CBLAS_TRANSPOSE::CblasTrans)
+        != (args.layout == CBLAS_LAYOUT::CblasRowMajor)
     {
         n
     } else {
         k
     };
-    let ldc = if layout == CBLAS_LAYOUT::CblasRowMajor {
+    let ldc = if args.layout == CBLAS_LAYOUT::CblasRowMajor {
         n
     } else {
         m
@@ -284,7 +334,17 @@ fn main() {
     let mut records = Vec::with_capacity(args.repeats);
     for i in 0..args.repeats {
         let duration = kernel.run(
-            layout, trans_a, trans_b, dimensions, &a, lda, &b, ldb, &mut c, ldc, args.alpha,
+            args.layout,
+            trans_a,
+            trans_b,
+            dimensions,
+            &a,
+            lda,
+            &b,
+            ldb,
+            &mut c,
+            ldc,
+            args.alpha,
             args.beta,
         );
         println!("Duration: {:.6}ms", duration.as_milis());
@@ -294,7 +354,7 @@ fn main() {
             let difference = unsafe {
                 let mut d = utils::malloc::<f64>(m * n);
                 cblas_dgemm(
-                    layout,
+                    args.layout,
                     trans_a,
                     trans_b,
                     m as _,
@@ -337,7 +397,7 @@ fn main() {
         repeats: args.repeats,
         alpha: args.alpha,
         beta: args.beta,
-        layout,
+        layout: args.layout,
         transpose,
         statistics: common::Statistics::from(&records),
     };
