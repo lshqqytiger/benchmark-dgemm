@@ -61,6 +61,10 @@ struct Arguments {
     #[argh(option, arg_name = "bool", from_str_fn(parse_boolean))]
     override_compiler_args: Option<bool>,
 
+    /// warm up repeats
+    #[argh(option, default = "0")]
+    warm_up: usize,
+
     /// repeats
     #[argh(option, short = 'r', default = "10")]
     repeats: usize,
@@ -331,8 +335,70 @@ fn main() {
     let b = utils::fill_rand(k * n, 200, 0.0, 2.0);
     let mut c = unsafe { utils::malloc::<f64>(m * n) };
 
+    if !args.skip_verification {
+        kernel.run(
+            args.layout,
+            trans_a,
+            trans_b,
+            dimensions,
+            &a,
+            lda,
+            &b,
+            ldb,
+            &mut c,
+            ldc,
+            args.alpha,
+            args.beta,
+        );
+
+        let difference = unsafe {
+            let mut d = utils::malloc::<f64>(m * n);
+            cblas_dgemm(
+                args.layout,
+                trans_a,
+                trans_b,
+                m as _,
+                n as _,
+                k as _,
+                args.alpha,
+                a.as_ptr(),
+                lda as _,
+                b.as_ptr(),
+                ldb as _,
+                args.beta,
+                d.as_mut_ptr(),
+                ldc as _,
+            );
+
+            let n = (m * n) as _;
+            cblas_daxpy(n, -1.0, c.as_ptr(), 1, d.as_mut_ptr(), 1);
+            cblas_dnrm2(n, d.as_ptr(), 1)
+        };
+        if difference > 0.0001 {
+            eprintln!("WRONG RESULT!");
+            process::exit(1)
+        }
+    }
+
+    for _ in 0..args.warm_up {
+        kernel.run(
+            args.layout,
+            trans_a,
+            trans_b,
+            dimensions,
+            &a,
+            lda,
+            &b,
+            ldb,
+            &mut c,
+            ldc,
+            args.alpha,
+            args.beta,
+        );
+    }
+
     let mut records = Vec::with_capacity(args.repeats);
-    for i in 0..args.repeats {
+    for _ in 0..args.repeats {
         let duration = kernel.run(
             args.layout,
             trans_a,
@@ -349,36 +415,6 @@ fn main() {
         );
         println!("Duration: {:.6}ms", duration.as_milis());
         records.push(duration);
-
-        if i == 0 && !args.skip_verification {
-            let difference = unsafe {
-                let mut d = utils::malloc::<f64>(m * n);
-                cblas_dgemm(
-                    args.layout,
-                    trans_a,
-                    trans_b,
-                    m as _,
-                    n as _,
-                    k as _,
-                    args.alpha,
-                    a.as_ptr(),
-                    lda as _,
-                    b.as_ptr(),
-                    ldb as _,
-                    args.beta,
-                    d.as_mut_ptr(),
-                    ldc as _,
-                );
-
-                let n = (m * n) as _;
-                cblas_daxpy(n, -1.0, c.as_ptr(), 1, d.as_mut_ptr(), 1);
-                cblas_dnrm2(n, d.as_ptr(), 1)
-            };
-            if difference > 0.0001 {
-                eprintln!("WRONG RESULT!");
-                process::exit(1)
-            }
-        }
     }
     drop(library.close());
     let records = records;
