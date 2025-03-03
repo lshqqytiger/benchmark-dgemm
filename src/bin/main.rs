@@ -58,8 +58,8 @@ struct Arguments {
     compiler_args: Option<String>,
 
     /// TRUE: --compiler-args overrides default arguments inferred from system, FALSE: append mode
-    #[argh(option, arg_name = "bool", from_str_fn(parse_boolean))]
-    override_compiler_args: Option<bool>,
+    #[argh(switch)]
+    override_compiler_args: bool,
 
     /// warm up repeats
     #[argh(option, default = "0")]
@@ -217,7 +217,6 @@ fn build(
         command.arg("-lnuma");
         build_extra_args(&mut command);
         command.args(["-Wall", "-Werror"]);
-        command.arg("-shared");
         command.args(["-o", out]);
         command.arg(kernel);
         command.args(["-L", env!("PATH_LIBRARY")]);
@@ -226,6 +225,7 @@ fn build(
     if let Some(args) = compiler_args {
         command.args(args.split_whitespace());
     }
+    command.arg("-shared");
     command
         .spawn()
         .expect("Error: failed to run compiler")
@@ -283,7 +283,7 @@ fn main() {
         && !build(
             args.compiler,
             args.compiler_args,
-            args.override_compiler_args.unwrap_or(false),
+            args.override_compiler_args,
             &args.kernel,
             out,
         )
