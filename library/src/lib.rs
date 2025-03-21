@@ -1,11 +1,11 @@
 #[cfg(target_arch = "aarch64")]
 mod armpl;
 #[cfg(target_arch = "aarch64")]
-pub use armpl::{CBLAS_LAYOUT, CBLAS_TRANSPOSE};
+pub use armpl::{cblas_daxpy, cblas_dgemm, cblas_dnrm2, CBLAS_LAYOUT, CBLAS_TRANSPOSE};
 
-#[cfg_attr(target_arch = "x86", target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 mod mkl;
-#[cfg_attr(target_arch = "x86", target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 pub use mkl::{cblas_daxpy, cblas_dgemm, cblas_dnrm2, CBLAS_LAYOUT, CBLAS_TRANSPOSE};
 
 use std::fmt;
