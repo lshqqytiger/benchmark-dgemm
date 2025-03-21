@@ -1,6 +1,6 @@
-#[cfg(target_arch = "arm")]
+#[cfg(target_arch = "aarch64")]
 mod armpl;
-#[cfg(target_arch = "arm")]
+#[cfg(target_arch = "aarch64")]
 pub use armpl::{CBLAS_LAYOUT, CBLAS_TRANSPOSE};
 
 #[cfg_attr(target_arch = "x86", target_arch = "x86_64")]
