@@ -57,6 +57,10 @@ fn main() {
         }
     }
 
+    if reports.len() == 1 {
+        report.statistics.medium = reports[0].statistics.medium;
+    }
+
     {
         let mut maximum = common::Duration::MIN;
         for report in &reports {

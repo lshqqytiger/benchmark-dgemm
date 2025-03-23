@@ -149,7 +149,12 @@ impl Report {
                 ops / medium.as_nanos() as f64
             )?;
         }
-        writeln!(&mut out, "Average\t {:.6}ms", self.statistics.average)?;
+        writeln!(
+            &mut out,
+            "Average\t {:.6}ms \t({})",
+            self.statistics.average,
+            ops / self.statistics.average / 1000.0 / 1000.0
+        )?;
         writeln!(
             &mut out,
             "Worst\t {:.6}ms \t {}",
