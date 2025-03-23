@@ -217,8 +217,6 @@ fn build(
         command.arg("-lnuma");
         build_extra_args(&mut command);
         command.args(["-Wall", "-Werror"]);
-        command.args(["-o", out]);
-        command.arg(kernel);
         command.args(["-L", env!("PATH_LIBRARY")]);
         command.args(["-I", env!("PATH_INCLUDE")]);
     }
@@ -226,6 +224,8 @@ fn build(
         command.args(args.split_whitespace());
     }
     command.arg("-shared");
+    command.args(["-o", out]);
+    command.arg(kernel);
     command
         .spawn()
         .expect("Error: failed to run compiler")
