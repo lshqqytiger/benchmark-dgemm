@@ -1,7 +1,8 @@
 use argh::FromArgs;
 use benchmark::*;
+use libloading::Symbol;
 use library::{cblas_daxpy, cblas_dgemm, cblas_dnrm2, CBLAS_LAYOUT, CBLAS_TRANSPOSE};
-use std::{ffi::c_double, fs, io::Write, path, process, sync, time};
+use std::{ffi, fs, io::Write, path, process, sync, time};
 
 trait IsErrOr<T> {
     fn is_err_or(self, f: impl FnOnce(T) -> bool) -> bool;
@@ -29,57 +30,61 @@ fn parse_boolean(value: &str) -> Result<bool, String> {
 #[derive(FromArgs)]
 /// arguments
 struct Arguments {
-    /// path to kernel source file
     #[argh(positional, arg_name = "path-to-kernel")]
+    /// path to kernel source file
     kernel: String,
 
-    /// path to compiled binary
     #[argh(positional, arg_name = "path-to-out-file")]
+    /// path to compiled binary
     out: Option<String>,
 
-    /// save benchmark result
     #[argh(option, arg_name = "path-to-report-file")]
+    /// save benchmark result
     save_as: Option<String>,
 
-    /// save benchmark history
     #[argh(option, arg_name = "path-to-history-file")]
+    /// save benchmark history
     save_history_as: Option<String>,
 
-    /// TRUE: recompile anyway, FALSE: don't recompile
     #[argh(option, arg_name = "bool", from_str_fn(parse_boolean))]
+    /// TRUE: recompile anyway, FALSE: don't recompile
     compile: Option<bool>,
 
-    /// compiler
     #[argh(option, default = "Arguments::default_compiler()")]
+    /// compiler
     compiler: String,
 
-    /// compiler arguments
     #[argh(option, arg_name = "argument")]
+    /// compiler arguments
     compiler_args: Option<String>,
 
-    /// TRUE: --compiler-args overrides default arguments inferred from system, FALSE: append mode
     #[argh(switch)]
+    /// TRUE: --compiler-args overrides default arguments inferred from system, FALSE: append mode
     override_compiler_args: bool,
 
-    /// warm up repeats
+    #[argh(option, arg_name = "node_id")]
+    /// numa node id
+    numa_node: Option<i32>,
+
     #[argh(option, default = "0")]
+    /// warm up repeats
     warm_up: usize,
 
-    /// repeats
     #[argh(option, short = 'r', default = "10")]
+    /// repeats
     repeats: usize,
 
-    /// skip dgemm result verification
     #[argh(switch)]
+    /// skip dgemm result verification
     skip_verification: bool,
 
-    /// layout; ROW: row-major, COL: col-major
     #[argh(
         option,
         arg_name = "layout",
         from_str_fn(CBLAS_LAYOUT::try_from),
         default = "CBLAS_LAYOUT::CblasRowMajor"
     )]
+    /// layout; ROW: row-major, COL: col-major
     layout: CBLAS_LAYOUT,
 
     /// transpose a; FALSE: not transposed, TRUE: transposed, CONJ: conjugate transposed
@@ -130,57 +135,57 @@ impl Arguments {
     }
 }
 
-struct Kernel<'lib>(
-    libloading::Symbol<
-        'lib,
-        unsafe extern "C" fn(
-            layout: CBLAS_LAYOUT,
-            TransA: CBLAS_TRANSPOSE,
-            TransB: CBLAS_TRANSPOSE,
-            m: usize,
-            n: usize,
-            k: usize,
-            alpha: c_double,
-            A: *const c_double,
-            lda: usize,
-            B: *const c_double,
-            ldb: usize,
-            beta: c_double,
-            C: *mut c_double,
-            ldc: usize,
-        ),
-    >,
+fn alloc(len: usize, numa_node: Option<i32>) -> matrix::Matrix {
+    match numa_node {
+        Some(numa_node) => matrix::Matrix::numa(len, numa_node),
+        None => matrix::Matrix::new(len),
+    }
+}
+
+type Kernel = unsafe extern "C" fn(
+    layout: CBLAS_LAYOUT,
+    trans_a: CBLAS_TRANSPOSE,
+    trans_b: CBLAS_TRANSPOSE,
+    m: usize,
+    n: usize,
+    k: usize,
+    alpha: ffi::c_double,
+    a: *const ffi::c_double,
+    lda: usize,
+    b: *const ffi::c_double,
+    ldb: usize,
+    beta: ffi::c_double,
+    c: *mut ffi::c_double,
+    ldc: usize,
 );
 
-impl<'lib> Kernel<'lib> {
-    fn run(
-        &self,
-        layout: CBLAS_LAYOUT,
-        trans_a: CBLAS_TRANSPOSE,
-        trans_b: CBLAS_TRANSPOSE,
-        (m, n, k): (usize, usize, usize),
-        a: &Box<[f64]>,
-        lda: usize,
-        b: &Box<[f64]>,
-        ldb: usize,
-        c: &mut Box<[f64]>,
-        ldc: usize,
-        alpha: f64,
-        beta: f64,
-    ) -> common::Duration {
-        let a = a.as_ptr();
-        let b = b.as_ptr();
-        let c = c.as_mut_ptr();
+fn run_kernel(
+    kernel: &Symbol<Kernel>,
+    layout: CBLAS_LAYOUT,
+    trans_a: CBLAS_TRANSPOSE,
+    trans_b: CBLAS_TRANSPOSE,
+    (m, n, k): (usize, usize, usize),
+    a: &matrix::Matrix,
+    lda: usize,
+    b: &matrix::Matrix,
+    ldb: usize,
+    c: &mut matrix::Matrix,
+    ldc: usize,
+    alpha: f64,
+    beta: f64,
+) -> common::Duration {
+    let a = a.as_ptr();
+    let b = b.as_ptr();
+    let c = c.as_mut_ptr();
 
-        let start_time = time::Instant::now();
-        unsafe {
-            self.0(
-                layout, trans_a, trans_b, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc,
-            );
-        }
-        let end_time = time::Instant::now();
-        common::Duration((end_time - start_time).as_nanos())
+    let start_time = time::Instant::now();
+    unsafe {
+        kernel(
+            layout, trans_a, trans_b, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc,
+        );
     }
+    let end_time = time::Instant::now();
+    common::Duration((end_time - start_time).as_nanos())
 }
 
 fn check_args(args: &Arguments) {
@@ -295,10 +300,8 @@ fn main() {
 
     let library =
         unsafe { libloading::Library::new(out) }.expect("Error: failed to load compiled object");
-    let kernel = Kernel(
-        unsafe { library.get(b"call_dgemm") }
-            .expect("Error: compiled object does not contain symbol call_dgemm"),
-    );
+    let kernel: Symbol<Kernel> = unsafe { library.get(b"call_dgemm") }
+        .expect("Error: compiled object does not contain symbol call_dgemm");
 
     let dimensions = (args.m, args.n, args.k);
     let (m, n, k) = dimensions;
@@ -331,12 +334,16 @@ fn main() {
         m
     };
 
-    let a = utils::fill_rand(m * k, 100, 0.0, 2.0);
-    let b = utils::fill_rand(k * n, 200, 0.0, 2.0);
-    let mut c = unsafe { utils::malloc::<f64>(m * n) };
+    let a = alloc(m * k, args.numa_node);
+    let b = alloc(k * n, args.numa_node);
+    let mut c = alloc(m * n, args.numa_node);
+
+    a.fill(100, 0.0, 2.0);
+    b.fill(200, 0.0, 2.0);
 
     if !args.skip_verification {
-        kernel.run(
+        run_kernel(
+            &kernel,
             args.layout,
             trans_a,
             trans_b,
@@ -352,7 +359,7 @@ fn main() {
         );
 
         let difference = unsafe {
-            let mut d = utils::malloc::<f64>(m * n);
+            let mut d = alloc(m * n, args.numa_node);
             cblas_dgemm(
                 args.layout,
                 trans_a,
@@ -381,7 +388,8 @@ fn main() {
     }
 
     for _ in 0..args.warm_up {
-        kernel.run(
+        run_kernel(
+            &kernel,
             args.layout,
             trans_a,
             trans_b,
@@ -399,7 +407,8 @@ fn main() {
 
     let mut records = Vec::with_capacity(args.repeats);
     for _ in 0..args.repeats {
-        let duration = kernel.run(
+        let duration = run_kernel(
+            &kernel,
             args.layout,
             trans_a,
             trans_b,

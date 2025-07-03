@@ -8,8 +8,8 @@ struct Arguments {
     #[argh(positional)]
     reports: Vec<String>,
 
-    /// merge reports into one file
     #[argh(option, short = 'o')]
+    /// merge reports into one file
     out: Option<String>,
 }
 
