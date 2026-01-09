@@ -198,17 +198,28 @@ fn check_args(args: &Arguments) {
     }
 }
 
-#[cfg(target_arch = "aarch64")]
-fn build_extra_args(command: &mut process::Command) {
+#[cfg(all(target_arch = "aarch64", feature = "verification"))]
+fn build_linker_args(command: &mut process::Command) {
     command.arg("-fopenmp");
     command.arg("-lm");
     command.arg("-armpl");
+}
+
+#[cfg(all(
+    any(target_arch = "x86", target_arch = "x86_64"),
+    feature = "verification"
+))]
+fn build_linker_args(command: &mut process::Command) {
+    command.arg("-lmkl_rt");
+}
+
+#[cfg(target_arch = "aarch64")]
+fn build_arch_arg(command: &mut process::Command) {
     command.arg("-mcpu=native");
 }
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-fn build_extra_args(command: &mut process::Command) {
-    command.arg("-lmkl_rt");
+fn build_arch_arg(command: &mut process::Command) {
     command.arg("-march=native");
 }
 
@@ -223,7 +234,9 @@ fn build(
     if !override_mode {
         command.arg("-O3");
         command.arg("-lnuma");
-        build_extra_args(&mut command);
+        #[cfg(feature = "verification")]
+        build_linker_args(&mut command);
+        build_arch_arg(&mut command);
         command.args(["-Wall", "-Werror"]);
         command.args(["-L", env!("PATH_LIBRARY")]);
         command.args(["-I", env!("PATH_INCLUDE")]);
