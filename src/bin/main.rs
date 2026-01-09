@@ -1,7 +1,9 @@
 use argh::FromArgs;
 use benchmark::*;
 use libloading::Symbol;
-use library::{cblas_daxpy, cblas_dgemm, cblas_dnrm2, CBLAS_LAYOUT, CBLAS_TRANSPOSE};
+#[cfg(feature = "verification")]
+use library::{cblas_daxpy, cblas_dgemm, cblas_dnrm2};
+use library::{CBLAS_LAYOUT, CBLAS_TRANSPOSE};
 use std::{ffi, fs, io::Write, path, process, sync, time};
 
 trait IsErrOr<T> {
@@ -74,6 +76,7 @@ struct Arguments {
     /// repeats
     repeats: usize,
 
+    #[cfg(feature = "verification")]
     #[argh(switch)]
     /// skip dgemm result verification
     skip_verification: bool,
@@ -341,6 +344,7 @@ fn main() {
     a.fill(100, 0.0, 2.0);
     b.fill(200, 0.0, 2.0);
 
+    #[cfg(feature = "verification")]
     if !args.skip_verification {
         run_kernel(
             &kernel,

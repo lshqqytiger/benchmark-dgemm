@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 build = "build.rs"
 
+[features]
+verification = ["library/link"]
+
 [dependencies]
 library = { path = "./library" }
 argh = "0.1.13"
